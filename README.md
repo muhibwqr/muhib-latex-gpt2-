@@ -32,6 +32,41 @@ Everything is TeX. The repo has no Python, Lua, JavaScript or shell scripts.
 - In TeXstudio, set Build & View (`Tools\Commands\quick` in texstudio.ini) to repeat `txs:///pdflatex | txs:///view-pdf-internal --embedded` 8 times; the preview then refreshes after every compile.
 - Projected compile time, according to the author: instant.
 
+## Proof
+
+**Same tokens as float GPT-2.** A float64 NumPy forward pass of the same checkpoint, picking greedily, gives exactly the token ids the TeX run gives:
+
+| prompt (`tex/` file) | TeX output (ids) | float GPT-2 |
+|---|---|---|
+| "The most dangerous thing about AI is" (`muhibai.tex`, 15 compiles) | " that it's so easy to make mistakes." (326, 340, 338, 523, 2562, 284, 787, 10135, 13) | identical |
+| "Muhib wrote a paper about" (`muhib.tex`, 12 compiles) | " the issue in the journal Science." (262, 2071, 287, 262, 3989, 5800, 13) | identical |
+
+The last compile of the `muhibai.tex` run logged:
+
+```text
+[GPT-2 live: resuming at token 9, position 14] [GPT-2 prompt = 7 tokens]
+>>> GPT-2 token 9/9: "." 46.8% (next best: "," 13.3%, " and" 9.1%)
+```
+
+**Same checkpoint.** These are the files `curl` downloads; the `model.safetensors` hash equals the `X-Linked-ETag` Hugging Face serves for it.
+
+```text
+248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707  model.safetensors
+196139668be63f3b5d6574427317ae82f612a97c5d1cdaf36ed2256dbf636783  vocab.json
+1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5  merges.txt
+```
+
+**Same converted weights.** After `pdflatex convert.tex`, all 780 files in `tex/w/` together hash to the value below, whether conversion runs in 1 process or 12:
+
+```sh
+cd tex/w && LC_ALL=C ls | LC_ALL=C xargs cat | shasum -a 256
+# 2a55eea0c561c82fdbc8de400ad4fbc05c0f4cb2cb91e012f9a5a8591522d74e
+```
+
+During development the same 780 files were also byte-identical to a separate float exporter, and TeX's 84 per-layer checksums matched a bit-exact simulator of its integer math.
+
+**Measured time** (M4 Pro VM, while screen recording): 14.3 s per prompt token and 20.8 s per generated token for `muhibai.tex`; conversion 92 s with 12 parallel `pdflatex` processes, 13 min 50 s with one.
+
 ## Run it
 
 You need TeX Live (or MacTeX) with `pdflatex`, `curl`, and about 2 GB of disk.
