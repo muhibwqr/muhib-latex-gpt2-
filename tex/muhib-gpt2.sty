@@ -70,8 +70,11 @@
 \def\gpt@cache#1#2{\expandafter\gdef\csname gpt@C#1\endcsname{#2}}
 \def\gpt@mat#1{\ifcsname gpt@C#1\endcsname\expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi
   {\csname gpt@C#1\endcsname}{\gpt@input{#1}}}
+% primitive file test: \IfFileExists under \globaldefs=1 leaks \escapechar=-1
+\newread\gpt@rd
 \def\gpt@loadcache{\ifx\gpt@cacheloaded\relax\else\let\gpt@cacheloaded\relax
-  \IfFileExists{\gpt@dir cache.tex}{\message{[GPT-2 loading weights into TeX memory]}\gpt@input{cache}}{}\fi}
+  \openin\gpt@rd=\gpt@dir cache.tex \ifeof\gpt@rd\else\closein\gpt@rd
+  \message{[GPT-2 loading weights into TeX memory]}\gpt@input{cache}\fi\fi}
 
 % ---- embeddings: lines \ifnum\gpt@tok=<id> \!x v \!x v ... \fi ----
 \def\gpt@xset{\advance\gpt@xi\@ne\count\gpt@xi=}
