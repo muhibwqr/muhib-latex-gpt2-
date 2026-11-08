@@ -24,3 +24,12 @@ bench2/
 tex/t_*.tex
 tex/fmt*.tex
 export_act.log
+tex/w2/
+tex/w7/
+tex/z*
+tex/rp*.tex
+tex/muhibc.tex
+tex/muhibw2.tex
+*.fmt
+zquant*.py
+ztfm.py

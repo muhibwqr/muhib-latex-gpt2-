@@ -13,6 +13,9 @@
 \newif\ifgpt@live \DeclareOption{live}{\gpt@livetrue}
 % compact: layer matrices in 5-bit "weight byte" files (<name>.k<c>.tex, export_wb.py)
 \newif\ifgpt@wb \DeclareOption{compact}{\gpt@wbtrue}
+% fonthbox: rows are typeset as \hbox'es of glyphs whose widths are weight*activation, so TeX's
+% box packing does the multiply-adds (export_fh.py: <name>.f<c>.tex, fonts gf[pm]<v>.tfm)
+\newif\ifgpt@fh \DeclareOption{fonthbox}{\gpt@fhtrue}
 \ProcessOptions\relax
 \RequirePackage{xcolor}
 
@@ -31,7 +34,7 @@
 \newcount\gpt@tva \newcount\gpt@tvb \newcount\gpt@tvc \newcount\gpt@tvd \newcount\gpt@tve
 \newcount\gpt@tia \newcount\gpt@tib \newcount\gpt@tic \newcount\gpt@tid \newcount\gpt@tie
 \newcount\gpt@contra \newcount\gpt@bi \newcount\gpt@bo \newcount\gpt@br \newcount\gpt@rk
-\newcount\gpt@utf \newcount\gpt@ai \newcount\gpt@ck
+\newcount\gpt@utf \newcount\gpt@ai \newcount\gpt@ck \newcount\gpt@fmx \newcount\gpt@fb \newcount\gpt@hoa \newcount\gpt@hob \newcount\gpt@hoc \newcount\gpt@hod \newcount\gpt@hoe
 
 % Register layout (eTeX gives 32768 \count registers):
 %   10000+i residual x (768)      11000+i LN output / attention output (768)
@@ -74,10 +77,11 @@
 \def\!U{\advance\gpt@ai\@ne\count\gpt@ai=\numexpr\count\gpt@ai}
 \def\!Y#1#2{\advance\gpt@ai\@ne\advance\gpt@yi\@ne\def\gpt@ym{#1}\def\gpt@yb{#2}%
   \afterassignment\gpt@Yfin\gpt@acc=\numexpr\count\gpt@ai}
-\def\gpt@Yset{\count\gpt@yi=\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
-\def\gpt@Yadd{\advance\count\gpt@yi\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
+\def\gpt@dq{\gpt@acc*\gpt@ym/1073741824}
+\def\gpt@Yset{\count\gpt@yi=\numexpr\gpt@dq+\gpt@yb\relax}
+\def\gpt@Yadd{\advance\count\gpt@yi\numexpr\gpt@dq+\gpt@yb\relax}
 % LM head row: keep the top 5 logits and an online softmax sum Z (max term = 65536)
-\def\gpt@Ymax{\gpt@t=\numexpr\gpt@acc*\gpt@ym/1073741824\relax
+\def\gpt@Ymax{\gpt@t=\numexpr\gpt@dq+\gpt@yb\relax
   \ifnum\gpt@t>\gpt@tve \gpt@topins\fi
   \ifnum\gpt@t>\gpt@best
     \ifnum\gpt@Z>0 \gpt@expneg{\numexpr(\gpt@t-\gpt@best)*64\relax}\gpt@Z=\numexpr\gpt@Z*\gpt@ex/65536\relax\fi
@@ -95,7 +99,8 @@
 \def\gpt@mvset#1#2#3{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@lmat{#1}{#3}}
 \def\gpt@mvadd#1#2#3{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@lmat{#1}{#3}}
 \def\gpt@cext{c}
-\def\gpt@lmat#1#2{\ifgpt@wb\def\gpt@cext{k}\gpt@wbon\gpt@amat{#1}{#2}\gpt@wboff\def\gpt@cext{c}\else\gpt@amat{#1}{#2}\fi}
+\def\gpt@lmat#1#2{\ifgpt@fh\gpt@fmat{#1}{#2}\else\ifgpt@wb\def\gpt@cext{k}\gpt@wbon\gpt@amat{#1}{#2}\gpt@wboff\def\gpt@cext{c}\else\gpt@amat{#1}{#2}\fi\fi}
+\def\gpt@hmat{\ifgpt@fh\expandafter\gpt@fmat\else\expandafter\gpt@amat\fi}
 \def\gpt@amat#1#2{\def\gpt@mname{#1}\def\gpt@mbank{#2}\gpt@ck=0
   \edef\gpt@nck{\if G#2 24\else 6\fi}\gpt@chunk}
 \def\gpt@chunk{\ifnum\gpt@ck<\gpt@nck\relax
@@ -121,6 +126,56 @@
       \let\noexpand~\expandafter\noexpand\csname gpt@wsv\gpt@c\endcsname}}%
   \advance\gpt@k\@ne}
 \lccode126=\gpt@lcsave\relax
+
+% ---- fonthbox matrices ----
+% Byte 128+j is \let to the glyph of level x_j*127/max (or \relax for 0); bytes FB are \let to
+% the weight fonts; bytes 1-4 open the row box and add its width (in sp) to the row accumulator.
+\def\gpt@fmat#1#2{\ifgpt@fhfonts\else\gpt@fhloadfonts\fi
+  \def\gpt@mname{#1}\def\gpt@mbank{#2}\gpt@ck=0
+  \if G#2 \def\gpt@nck{24}\gpt@fb=15000 \else\def\gpt@nck{6}\gpt@fb=11000 \fi
+  \def\gpt@dqf{\numexpr\gpt@acc*\gpt@ym/1048576\relax*\gpt@fmx/130048}\let\gpt@dq\gpt@dqf
+  \gpt@fmx=1 \gpt@loop{\numexpr128*\gpt@nck\relax}{\gpt@t=\count\numexpr\gpt@fb+\gpt@i\relax
+    \ifnum\gpt@t<0 \gpt@t=-\gpt@t\fi\ifnum\gpt@t>\gpt@fmx \gpt@fmx=\gpt@t\fi}%
+  \edef\gpt@restore{\endlinechar=\the\endlinechar\relax\the\font}\endlinechar=-1 \gpt@fhon\gpt@fchunk\gpt@fhoff\gpt@restore}
+\def\gpt@fchunk{\ifnum\gpt@ck<\gpt@nck\relax
+  \gpt@ai=20999 \gpt@j=0 \gpt@fbank\lccode65=97 \lccode126=\gpt@lcsave\relax
+  \@@input\gpt@dir\gpt@mname.f\the\gpt@ck.tex\relax\advance\gpt@ck\@ne\expandafter\gpt@fchunk\fi}
+\def\gpt@fbank{\ifnum\gpt@j<128 \lccode126=\numexpr128+\gpt@j\relax
+  \gpt@t=\numexpr\count\numexpr\gpt@fb+128*\gpt@ck+\gpt@j\relax*127/\gpt@fmx\relax
+  \ifnum\gpt@t=0 \lowercase{\let~\relax}\else\lccode65=\numexpr\gpt@t+128\relax\lowercase{\let~A}\fi
+  \advance\gpt@j\@ne\expandafter\gpt@fbank\fi}
+\newif\ifgpt@fhfonts
+\def\gpt@fhv#1{\ifnum#1<49 -\the\numexpr49-#1\relax\else\the\numexpr#1-48\relax\fi}% index -> weight
+\def\gpt@fhloadfonts{\global\gpt@fhfontstrue\gpt@k=0 \gpt@fhlf}
+\def\gpt@fhlf{\ifnum\gpt@k<98 \gpt@t=\gpt@fhv\gpt@k\relax
+  \global\expandafter\font\csname gpt@fn\the\gpt@k\endcsname=\gpt@dir gf\ifnum\gpt@t<0 m\the\numexpr-\gpt@t\relax\else p\the\gpt@t\fi\space at 16pt
+  \advance\gpt@k\@ne\expandafter\gpt@fhlf\fi}
+\gdef\gpt@fhon{}\gdef\gpt@fhoff{}
+\def\gpt@fhadd#1#2{\lccode126=#1\relax\lowercase{\expandafter\let\csname gpt@fsv#1\endcsname~%
+    \xdef\gpt@fhon{\unexpanded\expandafter{\gpt@fhon}\catcode#1=13 \let\noexpand~#2}%
+    \xdef\gpt@fhoff{\unexpanded\expandafter{\gpt@fhoff}\catcode#1=\the\catcode#1\relax
+      \let\noexpand~\expandafter\noexpand\csname gpt@fsv#1\endcsname}}}
+\gpt@k=0 \gpt@j=5
+\def\gpt@fhmk{\ifnum\gpt@j<128
+  \ifnum0\ifnum\gpt@j=9 1\fi\ifnum\gpt@j=10 1\fi\ifnum\gpt@j=13 1\fi\ifnum\gpt@j=32 1\fi\ifnum\gpt@j=34 1\fi
+    \ifnum\gpt@j=35 1\fi\ifnum\gpt@j=37 1\fi\ifnum\gpt@j=45 1\fi\ifnum\gpt@j=92 1\fi\ifnum\gpt@j=94 1\fi
+    \ifnum\gpt@j=123 1\fi\ifnum\gpt@j>124 1\fi\ifnum\gpt@j>47 \ifnum\gpt@j<58 1\fi\fi=0
+    \ifnum\gpt@k<98 \expandafter\gpt@fhadd\expandafter{\the\gpt@j}{\expandafter\noexpand\csname gpt@fn\the\gpt@k\endcsname}\fi
+    \advance\gpt@k\@ne\fi
+  \advance\gpt@j\@ne\expandafter\gpt@fhmk\fi}\gpt@fhmk
+\gpt@fhadd1{\noexpand\gpt@fA}\gpt@fhadd2{\noexpand\gpt@fB}\gpt@fhadd3{\noexpand\gpt@fC}\gpt@fhadd4{\noexpand\gpt@fD}\gpt@fhadd{127}{\noexpand\gpt@fE}
+\lccode126=\gpt@lcsave\relax
+\def\gpt@fA{\setbox\z@\hbox\bgroup}
+\def\gpt@fB{\egroup\advance\gpt@ai\@ne\count\gpt@ai=\wd\z@}
+\def\gpt@fC{\egroup\advance\gpt@ai\@ne\advance\count\gpt@ai\wd\z@}
+\def\gpt@fD#1#2{\egroup\advance\gpt@ai\@ne\advance\gpt@yi\@ne\gpt@acc=\numexpr\count\gpt@ai+\wd\z@\relax
+  \def\gpt@ym{#1}\def\gpt@yb{#2}\gpt@Yfin}
+% head rows: the five outlier dims of ln_f (|h| up to ~200x the rest) are kept out of the glyph
+% levels and added exactly from 10-bit weights: byte 127{m}{q496}{q430}{q36}{q314}{q374}{m10}
+\def\gpt@fE#1#2#3#4#5#6#7{\egroup\advance\gpt@ai\@ne\advance\gpt@yi\@ne\gpt@acc=\numexpr\count\gpt@ai+\wd\z@\relax
+  \def\gpt@ym{#1}\def\gpt@yb{(#2*\gpt@hoa+#3*\gpt@hob+#4*\gpt@hoc+#5*\gpt@hod+#6*\gpt@hoe)*#7/1073741824}\gpt@Yfin}
+\def\gpt@fhout{\gpt@hoa=\gpt@A{496}\gpt@A{496}=0 \gpt@hob=\gpt@A{430}\gpt@A{430}=0 \gpt@hoc=\gpt@A{36}\gpt@A{36}=0
+  \gpt@hod=\gpt@A{314}\gpt@A{314}=0 \gpt@hoe=\gpt@A{374}\gpt@A{374}=0 }
 % the bytes 128-255 are LaTeX's UTF-8 active characters: save and restore their meaning
 \def\gpt@savebytes{\gpt@j=128 \gpt@sbl\lccode126=\gpt@lcsave\relax}
 \def\gpt@sbl{\ifnum\gpt@j<256 \lccode126=\gpt@j
@@ -242,8 +297,9 @@
     x0=\the\gpt@X0 x767=\the\gpt@X{767}]}}
 \def\gpt@head@argmax{\gpt@best=-2147483647 \gpt@yi=-1 \let\gpt@Yfin\gpt@Ymax \gpt@Z=0
   \gpt@tva=-2147483647 \gpt@tvb=\gpt@tva \gpt@tvc=\gpt@tva \gpt@tvd=\gpt@tva \gpt@tve=\gpt@tva
-  \gpt@amat{head0}A\gpt@amat{head1}A\gpt@amat{head2}A\gpt@amat{head3}A%
-  \gpt@amat{head4}A\gpt@amat{head5}A\gpt@amat{head6}A\gpt@amat{head7}A}
+  \ifgpt@fh\gpt@fhout\fi
+  \gpt@hmat{head0}A\gpt@hmat{head1}A\gpt@hmat{head2}A\gpt@hmat{head3}A%
+  \gpt@hmat{head4}A\gpt@hmat{head5}A\gpt@hmat{head6}A\gpt@hmat{head7}A}
 
 \def\gpt@now{\ifdefined\pdfelapsedtime\the\pdfelapsedtime\else0\fi}
 \def\gpt@run{\edef\gpt@tzero{\gpt@now}\ifnum\gpt@ngen<\gpt@want \expandafter\gpt@runloop\fi}

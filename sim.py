@@ -32,7 +32,7 @@ def tmuldiv(a, b, c):
 def quant_rows(w, qmax=QMAX):  # w: (out, in) float -> int rows in [-qmax, qmax], m (scale*2^30)
     amax = np.abs(w).max(1); amax[amax == 0] = 1
     s = amax / qmax
-    q = np.round(w / s[:, None]).astype(np.int64)
+    q = np.round(w * qmax / amax[:, None]).astype(np.int64)  # exact for float64 w; ties to even
     m = np.round(s * 2**30).astype(np.int64)
     return q, m
 
@@ -133,10 +133,12 @@ class Model:
             x = x + self.matvec('mproj', d['mlp.c_proj'], g); track('resid', x)
             if DEBUG: print(f'[dbg pos={pos} layer={l} sum={int(tdiv(x, 16).sum())} x0={x[0]} x767={x[767]}]')
         h = self.ln('lnf', x, self.lnf)
+        logits = self.headlogits(h)
+        return int(np.argmax(logits)), logits, h
+    def headlogits(self, h):
         q, m = self.head
         prods = q * h[None, :]; track('head.prefix', np.cumsum(prods, 1))
-        logits = tmuldiv(prods.sum(1), m, 2**30)
-        return int(np.argmax(logits)), logits, h
+        return tmuldiv(prods.sum(1), m, 2**30)
 
 def generate(model, ids, n):
     cache = [[] for _ in range(L)]

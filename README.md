@@ -19,7 +19,7 @@ For every token, TeX also keeps the top 5 logits and runs an online softmax over
 ## What actually runs where
 
 - **At compile time, only TeX runs.** The math is eTeX `\numexpr` integer arithmetic. It covers token and position embeddings, layer norm, the QKV projections, causal self-attention with a KV cache, softmax, GELU, the MLP, the final layer norm, the tied 50,257-way output head, and argmax. The byte-level BPE tokenizer and the decoder are TeX macros too. `compile.sh` passes `-no-shell-escape`, and nothing uses Lua.
-- **Python runs only once, ahead of time.** It downloads the checkpoint and writes the weights out as plain-text `.tex` files (about 1.4 GB). It also holds the float reference (`ref.py`) and a bit-exact simulator of the TeX arithmetic (`sim.py`), which I used to check the TeX output layer by layer.
+- **The weight conversion can run in TeX too.** `tex/convert.tex` reads the raw `model.safetensors` with pdfTeX's `\pdffiledump` and writes the same `.tex` weight files as the Python exporter, byte for byte (see below). Python is otherwise used once, ahead of time: it downloads the checkpoint and can also write the weights out as plain-text `.tex` files (about 1.4 GB). It also holds the float reference (`ref.py`) and a bit-exact simulator of the TeX arithmetic (`sim.py`), which I used to check the TeX output layer by layer.
 
 ## Numbers
 
@@ -44,6 +44,16 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 tex/compile.sh                      # writes tex/muhib.pdf
 ```
 
+### Converting the checkpoint in TeX instead
+
+Only `hf/model.safetensors`, `hf/vocab.json` and `hf/merges.txt` are needed (the official GPT-2 small files from Hugging Face). Then:
+
+```sh
+cd tex && max_print_line=1000000 pdflatex -no-shell-escape convert.tex   # -> tex/w/
+```
+
+`\pdffiledump` returns the checkpoint's bytes as hex. TeX parses the safetensors JSON header for tensor offsets, decodes each IEEE-754 float32 with `\numexpr`, quantizes each row exactly (round half to even on the exact value of w*qmax/amax), and writes the norms, embeddings, active-byte layer chunks, output head, vocabulary and merges. On an M4 Pro VM it takes about 22 minutes on one core (the Python exporter takes a couple of minutes), and all 780 files it writes are byte-identical to the Python export. `\def\cvout{dir/}` before `\input convert` changes the output directory. It writes the default-format files only, not the `compact` or `fonthbox` ones.
+
 `compile.sh` raises two of TeX's memory limits through environment variables (`save_size`, `extra_mem_top`). The default settings are too small: the vocabulary alone defines 50,257 control sequences.
 
 ## TeXstudio
@@ -56,6 +66,8 @@ Most of the time goes into TeX tokenizing the weight text, not into the arithmet
 
 Experimental `compact` option (`\usepackage[live,compact]{muhib-gpt2}`, files from `export_wb.py`): each layer weight becomes one byte, an active character `\countdef`'d to a register holding a 5-bit weight, so a multiply-add is 4 characters (`+`, weight byte, `*`, input byte). On an M4 Pro VM it cut a generation compile from 19.7 s to 16.5 s and a prompt compile from 13.4 s to 10.6 s. The 84 per-layer checksums match `QMAX=31 DEBUG=1 .venv/bin/python sim.py`, and both demo prompts keep their output, but 5-bit weights change the output on 4 of 8 other test prompts, so it is off by default.
 
+Experimental `fonthbox` option (`\usepackage[live,fonthbox]{muhib-gpt2}`, files and fonts from `export_fh.py`): each 5-bit weight value is its own font whose glyph widths are weight times an 8-bit activation level, and each row chunk is typeset as an `\hbox`, so TeX's box packing sums the products in C. Five outlier dimensions of the final hidden state are handled with exact integer arithmetic in the output head. On an M4 Pro VM a generated token took about 6.6 s (19.7 s by default). The 84 per-layer checksums match `simfh.py`, and the demo sentence is unchanged, but it is a different quantization: it matches the default on 5 of 10 test prompts (8 of 10 match float GPT-2 for all 7 tokens, against 7 of 10 for the default).
+
 To check the arithmetic against Python, load the package with `\usepackage[debug]{muhib-gpt2}`. It prints per-layer checksums that should match `DEBUG=1 .venv/bin/python sim.py` exactly.
 
 ## Files
@@ -65,5 +77,7 @@ To check the arithmetic against Python, load the package with `\usepackage[debug
 - `tex/compile.sh`: the compile wrapper
 - `export.py`, `export_vocab.py`: write the weight and tokenizer files that TeX reads
 - `export_wb.py`: 5-bit weight-byte layer files for the experimental `compact` option
+- `export_fh.py`, `simfh.py`: weight files, fonts and simulator for the experimental `fonthbox` option
+- `tex/convert.tex`: the checkpoint-to-TeX converter written in TeX
 - `sim.py`: integer simulator of the TeX arithmetic
 - `ref.py`: float GPT-2 reference in NumPy

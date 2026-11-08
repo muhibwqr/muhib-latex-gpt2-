@@ -1,0 +1,183 @@
+% convert.tex -- turns GPT-2's model.safetensors (plus vocab.json, merges.txt) into the
+% weight files in w/, in TeX.  pdfTeX's \pdffiledump reads the raw checkpoint bytes as hex;
+% float32 decoding, quantization and rounding are eTeX \numexpr integer arithmetic.
+%   cd tex && max_print_line=1000000 pdflatex -no-shell-escape convert.tex
+\makeatletter \catcode`\!=12
+\ifx\cvjobs\undefined \def\cvjobs{\cv@all}\fi
+\ifx\cvout\undefined \def\cvout{w/}\fi
+\ifx\cvdir\undefined \def\cvdir{../hf/}\fi
+\edef\cv@src{\cvdir model.safetensors}
+\count@=0
+\@for\cv@nm:=hi,lo,k,i,r,t,e,m,E,M,d,q,x,hn,base,bbase,gbase,rm,mx,n,RS,IS,in,nch,g,gh,c,Q,X,Y,u,v,w,xa,xb,ya,yb,jend,jbase,fbase,mm,bb,rbeg,rend,a,z,L,b,B,nb,kb\do{%
+  \expandafter\newcount\csname cv@\cv@nm\endcsname}
+\let\BS\@backslashchar
+\cv@t=1 \cv@i=0
+\loop \expandafter\xdef\csname cv@p\the\cv@i\endcsname{\the\cv@t}\ifnum\cv@i<30 \multiply\cv@t2 \advance\cv@i1 \repeat
+\def\cv@pw#1{\csname cv@p\number#1\endcsname}
+\def\cv@hd#1{\ifcase\numexpr#1\relax 0\or1\or2\or3\or4\or5\or6\or7\or8\or9\or A\or B\or C\or D\or E\or F\fi}
+\cv@i=1
+\loop \edef\cv@hx{\cv@hd{\numexpr(2*\cv@i-15)/32\relax}\cv@hd{\numexpr\cv@i-16*((2*\cv@i-15)/32)\relax}}%
+  \begingroup\lccode`\?=\cv@i \lowercase{\endgroup\expandafter\gdef\csname cv@c\cv@hx\endcsname{?}}%
+  \ifnum\cv@i>127 \begingroup\lccode`\?=\cv@i \lowercase{\endgroup\expandafter\gdef\csname cv@b\the\numexpr\cv@i-128\endcsname{?}}\fi
+  \ifnum\cv@i<255 \advance\cv@i1 \repeat
+% ---- integer helpers ----
+\def\cv@fdiv#1#2#3{#1=\numexpr(#2)/(#3)\relax \ifnum\numexpr#1*(#3)\relax>\numexpr#2\relax \advance#1-1 \fi}
+\def\cv@mulmod#1#2#3{% #1 := #2*#3 mod 2^30, for 0 <= #2,#3 < 2^31
+  \cv@fdiv\cv@xa{#2}{32768}\cv@xb=\numexpr#2-\cv@xa*32768\relax
+  \cv@fdiv\cv@ya{#3}{32768}\cv@yb=\numexpr#3-\cv@ya*32768\relax
+  \cv@u=\numexpr\cv@xa*\cv@yb\relax \cv@fdiv\cv@v\cv@u{32768}\cv@u=\numexpr\cv@u-\cv@v*32768\relax
+  \cv@w=\numexpr\cv@xb*\cv@ya\relax \cv@fdiv\cv@v\cv@w{32768}\cv@w=\numexpr\cv@w-\cv@v*32768\relax
+  \cv@u=\numexpr\cv@u+\cv@w\relax \ifnum\cv@u>32767 \advance\cv@u-32768 \fi
+  #1=\numexpr\cv@u*32768+\cv@xb*\cv@yb\relax \ifnum#1>1073741823 \advance#1-1073741824 \fi}
+% ---- float32 ----  key = the float's bits as a signed 31-bit integer (sign kept as the sign)
+\def\cv@dec#1#2#3#4#5#6#7#8{\cv@hi="#7#8#5#6\relax\cv@lo="#3#4#1#2\relax
+  \cv@k=\numexpr(\ifnum\cv@hi>32767 \cv@hi-32768\else\cv@hi\fi)*65536+\cv@lo\relax
+  \ifnum\cv@hi>32767 \cv@k=-\cv@k\fi}
+\def\cv@unk#1{% |key| #1 -> value = \cv@m * 2^(\cv@e-150)
+  \cv@fdiv\cv@e{#1}{8388608}\cv@m=\numexpr#1-\cv@e*8388608\relax
+  \ifnum\cv@e=0 \cv@e=1 \else\advance\cv@m8388608 \fi}
+\def\cv@fx#1{% \cv@q := round(value*2^10), ties to even (numpy)
+  \cv@x=#1\relax \ifnum\cv@x<0 \cv@x=-\cv@x\fi \cv@unk\cv@x \cv@d=\numexpr\cv@e-140\relax
+  \ifnum\cv@d<0 \cv@d=-\cv@d
+    \ifnum\cv@d>24 \cv@q=0 \else
+      \cv@fdiv\cv@q\cv@m{\cv@pw\cv@d}\cv@rm=\numexpr2*(\cv@m-\cv@q*\cv@pw\cv@d)\relax
+      \ifnum\cv@rm>\cv@pw\cv@d\relax \advance\cv@q1 \else\ifnum\cv@rm=\cv@pw\cv@d\relax \ifodd\cv@q\advance\cv@q1 \fi\fi\fi\fi
+  \else \cv@q=\numexpr\cv@m*\cv@pw\cv@d\relax \fi
+  \ifnum#1<0 \cv@q=-\cv@q\fi}
+\def\cv@quant#1{% \cv@q := round(w*Q/amax) of the exact values, ties to even; amax = \cv@M*2^(\cv@E-150)
+  \cv@x=#1\relax \ifnum\cv@x<0 \cv@x=-\cv@x\fi
+  \ifnum\cv@x=0 \cv@q=0 \else \cv@unk\cv@x \cv@d=\numexpr\cv@E-\cv@e\relax
+    \ifnum\cv@d>12 \cv@q=0 \else
+      \cv@n=\numexpr\cv@Q*\cv@pw{\numexpr19-\cv@d}\relax
+      \cv@t=\numexpr\cv@m*\cv@n/\cv@M\relax
+      \cv@fdiv\cv@q\cv@t{524288}\cv@rm=\numexpr\cv@t-\cv@q*524288\relax
+      \ifnum\cv@rm>262144 \advance\cv@q1 \else\ifnum\cv@rm=262144 \cv@tie\fi\fi
+    \fi \ifnum#1<0 \cv@q=-\cv@q\fi \fi}
+\def\cv@tie{% t*2^-19 sits on a .5: the exact sign of m*n - t*M (|.| < 2^23) decides
+  \cv@mulmod\cv@X\cv@m\cv@n \cv@mulmod\cv@Y\cv@t\cv@M \cv@X=\numexpr\cv@X-\cv@Y\relax
+  \ifnum\cv@X<0 \advance\cv@X1073741824 \fi \ifnum\cv@X>536870911 \advance\cv@X-1073741824 \fi
+  \ifnum\cv@X>0 \advance\cv@q1 \else\ifnum\cv@X=0 \ifodd\cv@q\advance\cv@q1 \fi\fi\fi}
+% ---- safetensors header ----
+\def\cv@unhex#1#2{\ifx\relax#1\else\csname cv@c#1#2\endcsname\expandafter\cv@unhex\fi}
+\def\cv@h#1#2#3#4#5#6#7#8{\cv@hn="#7#8#5#6#3#4#1#2\relax}
+\expandafter\cv@h\pdffiledump offset0 length4{\cv@src}
+\edef\cv@hdr{\expandafter\cv@unhex\pdffiledump offset8 length\cv@hn{\cv@src}\relax\relax}
+\def\cv@find#1{\edef\cv@tmp{\noexpand\def\noexpand\cv@f####1\detokenize{"#1":}####2\detokenize{"data_offsets":[}####3,####4\noexpand\cv@end
+    {\cv@fbase=\noexpand\numexpr8+\the\cv@hn+####3\relax}}\cv@tmp\expandafter\cv@f\cv@hdr\cv@end}
+% ---- contiguous: gather row \cv@r (\cv@in floats, stride \cv@RS) into \count\cv@kb+i; \cv@mx = max |key| ----
+\def\cv@st{\count\numexpr\cv@kb+\cv@i\relax=\cv@k \ifnum\cv@k<0 \cv@k=-\cv@k\fi \ifnum\cv@k>\cv@mx \cv@mx=\cv@k\fi \advance\cv@i1 }
+\def\cv@gath{\cv@mx=0 \cv@i=0 \cv@gc}
+% strided (Conv1D, stored in x out): read rows \cv@r.. \cv@r+\cv@nb-1 together, one dump per input i;
+% row b's keys go to \count 1000+b*in+i, its max |key| to \count 25600+b
+\def\cv@gblk{\cv@b=0 \cv@gbz \cv@i=0 \cv@gbi}
+\def\cv@gbz{\ifnum\cv@b<\cv@nb \count\numexpr25600+\cv@b\relax=0 \advance\cv@b1 \expandafter\cv@gbz\fi}
+\def\cv@gbi{\ifnum\cv@i<\cv@in \cv@b=0
+  \edef\cv@rowx{\pdffiledump offset\numexpr\cv@base+4*(\cv@i*\cv@IS+\cv@r)\relax length\numexpr4*\cv@nb\relax{\cv@src}}%
+  \expandafter\cv@eb\cv@rowx\relax\relax\relax\relax\relax\relax\relax\relax \advance\cv@i1 \expandafter\cv@gbi\fi}
+\def\cv@eb#1#2#3#4#5#6#7#8{\ifx\relax#1\else\cv@dec#1#2#3#4#5#6#7#8\count\numexpr1000+\cv@b*\cv@in+\cv@i\relax=\cv@k
+  \ifnum\cv@k<0 \cv@k=-\cv@k\fi \ifnum\cv@k>\count\numexpr25600+\cv@b\relax \count\numexpr25600+\cv@b\relax=\cv@k\fi
+  \advance\cv@b1 \expandafter\cv@eb\fi}
+\def\cv@gc{\edef\cv@rowx{\pdffiledump offset\numexpr\cv@base+4*\cv@r*\cv@RS\relax length\numexpr4*\cv@in\relax{\cv@src}}%
+  \expandafter\cv@eat\cv@rowx\relax\relax\relax\relax\relax\relax\relax\relax}
+\def\cv@eat#1#2#3#4#5#6#7#8{\ifx\relax#1\else\cv@dec#1#2#3#4#5#6#7#8\cv@st\expandafter\cv@eat\fi}
+\def\cv@fxrow{\cv@i=0 \cv@fxr}% fx of the gathered row into \count28000+i
+\def\cv@fxr{\ifnum\cv@i<\cv@in \cv@fx{\count\numexpr20000+\cv@i}\count\numexpr28000+\cv@i\relax=\cv@q \advance\cv@i1 \expandafter\cv@fxr\fi}
+\def\cv@qrow{\cv@i=0 \cv@qr}
+\def\cv@qr{\ifnum\cv@i<\cv@in \cv@quant{\count\numexpr\cv@kb+\cv@i}\count\numexpr28000+\cv@i\relax=\cv@q \advance\cv@i1 \expandafter\cv@qr\fi}
+\def\cv@elem#1#2{\expandafter\cv@dec\pdffiledump offset\numexpr#1+4*(#2)\relax length4{\cv@src}}
+% ---- expandable writers over \count28000+j, j < \cv@jend ----
+\def\cv@T#1{\ifnum#1<\cv@jend \cv@term{#1}\expandafter\cv@T\expandafter{\the\numexpr#1+1\expandafter}\fi}
+\def\cv@term#1{\ifnum\count\numexpr28000+#1\relax=0 \else\ifnum\count\numexpr28000+#1\relax>0 +\fi
+  \the\count\numexpr28000+#1\relax*\csname cv@b\the\numexpr#1-\cv@jbase\endcsname\fi}
+\def\cv@Xs#1{\ifnum#1<\cv@jend \BS!x\space\the\count\numexpr28000+#1\relax\space\expandafter\cv@Xs\expandafter{\the\numexpr#1+1\expandafter}\fi}
+\def\cv@msg#1{\immediate\write16{[#1 \the\numexpr\pdfelapsedtime/65536\relax s]}}
+% ---- export_act.py rows: <name>.c<k>.tex ----
+% #1 name, #2 tensor, #3 RS, #4 IS, #5 inputs, #6 bias tensor or empty, #7 #8 row range, #9 qmax
+\def\cv@mat#1#2#3#4#5#6#7#8#9{\cv@find{#2}\cv@base=\cv@fbase \cv@RS=#3 \cv@IS=#4 \cv@in=#5 \cv@Q=#9
+  \cv@nch=\numexpr#5/128\relax \cv@B=\numexpr24576/#5\relax \def\cv@bt{#6}\ifx\cv@bt\@empty\else\cv@find{#6}\cv@bbase=\cv@fbase\fi
+  \cv@rbeg=#7\relax \cv@rend=#8\relax \def\cv@name{#1}\cv@g=0 \cv@grp\cv@msg{#1}}
+\def\cv@grp{\ifnum\cv@g<\cv@nch
+  \cv@gh=\numexpr\cv@g+12\relax \ifnum\cv@gh>\cv@nch \cv@gh=\cv@nch\fi
+  \cv@c=\cv@g \cv@open \cv@r=\cv@rbeg \cv@rows \cv@c=\cv@g \cv@close
+  \cv@g=\cv@gh \expandafter\cv@grp\fi}
+\def\cv@open{\ifnum\cv@c<\cv@gh \immediate\openout\numexpr\cv@c-\cv@g+1\relax=\cvout \cv@name.c\the\cv@c.tex\relax \advance\cv@c1 \expandafter\cv@open\fi}
+\def\cv@close{\ifnum\cv@c<\cv@gh \immediate\closeout\numexpr\cv@c-\cv@g+1\relax \advance\cv@c1 \expandafter\cv@close\fi}
+\def\cv@rows{\ifnum\cv@r<\cv@rend
+  \ifnum\cv@IS=1 \cv@kb=1000 \cv@gath \count25600=\cv@mx \cv@nb=1
+  \else \cv@nb=\numexpr\cv@rend-\cv@r\relax \ifnum\cv@nb>\cv@B \cv@nb=\cv@B\fi \cv@gblk \fi
+  \cv@b=0 \cv@brows \expandafter\cv@rows\fi}
+\def\cv@brows{\ifnum\cv@b<\cv@nb \cv@kb=\numexpr1000+\cv@b*\cv@in\relax \cv@mx=\count\numexpr25600+\cv@b\relax
+  \ifnum\cv@mx=0 \cv@mx=1065353216 \fi
+  \cv@unk\cv@mx \cv@E=\cv@e \cv@M=\cv@m \cv@d=\numexpr\cv@E-120\relax
+  \ifnum\cv@d<0 \cv@mm=\numexpr\cv@M/(\cv@Q*\cv@pw{-\cv@d})\relax \else \cv@mm=\numexpr\cv@M*\cv@pw\cv@d/\cv@Q\relax\fi
+  \ifx\cv@bt\@empty \cv@bb=0 \else \cv@elem\cv@bbase\cv@r \cv@fx\cv@k \cv@bb=\cv@q \fi
+  \cv@qrow \cv@a=\cv@c \cv@c=\cv@g \cv@wrow \cv@c=\cv@a \advance\cv@r1 \advance\cv@b1 \expandafter\cv@brows\fi}
+\def\cv@wrow{\ifnum\cv@c<\cv@gh \cv@jbase=\numexpr128*\cv@c\relax \cv@jend=\numexpr\cv@jbase+128\relax
+  \immediate\write\numexpr\cv@c-\cv@g+1\relax{\ifnum\cv@c=\numexpr\cv@nch-1\relax \BS!Y{\the\cv@mm}{\the\cv@bb}\else
+    \ifnum\cv@c=0 \BS!S\else\BS!U\fi\fi\cv@T{\cv@jbase}\BS relax}\advance\cv@c1 \expandafter\cv@wrow\fi}
+% ---- export.py: layer norms and embeddings ----
+\def\cv@ln#1#2#3{\cv@find{#2}\cv@base=\cv@fbase \cv@find{#3}\cv@bbase=\cv@fbase
+  \immediate\openout1=\cvout #1.tex\relax \cv@i=0 \cv@lnr \immediate\closeout1 \cv@msg{#1}}
+\def\cv@lnr{\ifnum\cv@i<768 \cv@elem\cv@base\cv@i \cv@fx\cv@k \cv@a=\cv@q \cv@elem\cv@bbase\cv@i \cv@fx\cv@k
+  \immediate\write1{\BS!L{\the\cv@a}{\the\cv@q}}\advance\cv@i1 \expandafter\cv@lnr\fi}
+% #1 file, #2 tensor, #3 first row, #4 row end, #5 register name
+\def\cv@emb#1#2#3#4#5{\cv@kb=20000 \cv@find{#2}\cv@base=\cv@fbase \cv@RS=768 \cv@IS=1 \cv@in=768 \cv@jend=768 \def\cv@var{#5}%
+  \immediate\openout1=\cvout #1.tex\relax \cv@r=#3\relax \cv@rend=#4\relax \cv@embr \immediate\closeout1 \cv@msg{#1}}
+\def\cv@embr{\ifnum\cv@r<\cv@rend \cv@gath\cv@fxrow
+  \immediate\write1{\BS ifnum\BS\cv@var=\the\cv@r\space\cv@Xs{0}\BS fi}\advance\cv@r1 \expandafter\cv@embr\fi}
+% ---- job list ----
+\def\cv@layer#1{\cv@ln{l#1ln1}{h.#1.ln_1.weight}{h.#1.ln_1.bias}\cv@ln{l#1ln2}{h.#1.ln_2.weight}{h.#1.ln_2.bias}%
+  \cv@mat{l#1qkv}{h.#1.attn.c_attn.weight}1{2304}{768}{h.#1.attn.c_attn.bias}0{2304}{2047}%
+  \cv@mat{l#1aproj}{h.#1.attn.c_proj.weight}1{768}{768}{h.#1.attn.c_proj.bias}0{768}{2047}%
+  \cv@mat{l#1fc}{h.#1.mlp.c_fc.weight}1{3072}{768}{h.#1.mlp.c_fc.bias}0{3072}{2047}%
+  \cv@mat{l#1mproj}{h.#1.mlp.c_proj.weight}1{768}{3072}{h.#1.mlp.c_proj.bias}0{768}{2047}}
+\def\cv@head#1{\cv@z=\numexpr(#1+1)*6283\relax \ifnum\cv@z>50257 \cv@z=50257 \fi
+  \cv@mat{head#1}{wte.weight}{768}1{768}{}{\numexpr#1*6283}{\cv@z}{1023}}
+\def\cv@wte#1{\cv@z=\numexpr(#1+1)*256\relax \ifnum\cv@z>50257 \cv@z=50257 \fi \cv@emb{wte#1}{wte.weight}{\numexpr#1*256}{\cv@z}{gpt@tok}}
+\def\cv@wpe#1{\cv@emb{wpe#1}{wpe.weight}{\numexpr#1*256}{\numexpr#1*256+256}{gpt@pos}}
+\def\cv@each#1#2{\cv@L=0 \def\cv@do{#2}\cv@eachr{#1}}
+\def\cv@eachr#1{\ifnum\cv@L<#1 \expandafter\cv@do\expandafter{\the\cv@L}\advance\cv@L1 \expandafter\cv@eachr\expandafter{\the\numexpr#1}\fi}
+\def\cv@all{\cv@ln{lnf}{ln_f.weight}{ln_f.bias}\cv@each{4}\cv@wpe\cv@each{197}\cv@wte
+  \cv@each{8}\cv@head\cv@each{12}\cv@layer\cv@tok}
+% ---- export_vocab.py: tokenizer files, read byte by byte as hex ----
+\@for\cv@nm:=ch,id,ida,cnt,cp,off,fsz,ub,un\do{\expandafter\newcount\csname cv@\cv@nm\endcsname}
+\def\cv@inbs#1{\ifnum#1<33 0\else\ifnum#1<127 1\else\ifnum#1<161 0\else\ifnum#1=173 0\else1\fi\fi\fi\fi}
+\cv@ub=0 \cv@un=0
+\loop \ifnum\cv@inbs\cv@ub=1 \expandafter\xdef\csname cv@u\the\cv@ub\endcsname{\the\cv@ub}\else
+  \expandafter\xdef\csname cv@u\the\numexpr256+\cv@un\endcsname{\the\cv@ub}\advance\cv@un1 \fi
+  \ifnum\cv@ub<255 \advance\cv@ub1 \repeat
+\def\cv@stream#1{\edef\cv@fn{#1}\cv@fsz=\pdffilesize{\cv@fn}\relax \cv@off=0 \cv@streamr}
+\def\cv@streamr{\ifnum\cv@off<\cv@fsz
+  \edef\cv@buf{\pdffiledump offset\cv@off length4096{\cv@fn}}\advance\cv@off4096
+  \expandafter\cv@eatb\cv@buf\relax\relax \expandafter\cv@streamr\fi}
+\def\cv@eatb#1#2{\ifx\relax#1\else \cv@ch="#1#2\relax \cv@state\expandafter\cv@eatb\fi}
+\def\cv@addcp#1{\edef\cv@key{\cv@key.\the#1}\edef\cv@bl{\cv@bl\csname cv@u\the#1\endcsname,}}
+\def\cv@addk#1{\edef\cv@key{\cv@key.\the#1}}
+% vocab.json: {"key": id, ...} with \" \\ \uXXXX escapes, ids in file order
+\def\cv@vs{\ifnum\cv@ch=34 \def\cv@key{}\def\cv@bl{}\let\cv@state\cv@vk\fi}
+\def\cv@vk{\ifnum\cv@ch=92 \let\cv@state\cv@ve\else\ifnum\cv@ch=34 \cv@id=0 \let\cv@state\cv@vv\else\cv@addcp\cv@ch\fi\fi}
+\def\cv@ve{\ifnum\cv@ch=117 \cv@cnt=0 \cv@cp=0 \let\cv@state\cv@vu\else \cv@addcp\cv@ch\let\cv@state\cv@vk\fi}
+\def\cv@vu{\cv@cp=\numexpr16*\cv@cp+\ifnum\cv@ch<58 \cv@ch-48\else\ifnum\cv@ch<71 \cv@ch-55\else\cv@ch-87\fi\fi\relax
+  \advance\cv@cnt1 \ifnum\cv@cnt=4 \cv@addcp\cv@cp\let\cv@state\cv@vk\fi}
+\def\cv@vv{\ifnum\cv@ch>47 \ifnum\cv@ch<58 \cv@id=\numexpr10*\cv@id+\cv@ch-48\relax\fi\fi
+  \ifnum\cv@ch=44 \cv@vend\fi\ifnum\cv@ch=125 \cv@vend\fi}
+\def\cv@vend{\expandafter\xdef\csname cv@v\cv@key\endcsname{\the\cv@id}%
+  \ifnum\cv@id=\cv@ida\else\errmessage{vocab.json ids out of order at \the\cv@id}\fi \advance\cv@ida1
+  \immediate\write1{\BS!t{\ifnum\cv@id=50256 \else\cv@bl\fi}}\let\cv@state\cv@vs}
+% merges.txt: "#version" line, then "a b" per line, UTF-8
+\def\cv@mz{\ifnum\cv@ch=10 \def\cv@key{}\let\cv@state\cv@ma\fi}
+\def\cv@piece#1#2{% #1 state for this piece, #2 action at its terminator
+  \ifnum\cv@ch>191 \cv@cp=\numexpr\cv@ch-192\relax \let\cv@state\cv@mc \let\cv@ret#1\else\cv@addk\cv@ch\fi}
+\def\cv@ma{\ifnum\cv@ch=32 \cv@ida=\csname cv@v\cv@key\endcsname\relax \def\cv@key{}\let\cv@state\cv@mb\else\cv@piece\cv@ma{}\fi}
+\def\cv@mb{\ifnum\cv@ch=10 \cv@mend\else\cv@piece\cv@mb{}\fi}
+\def\cv@mc{\cv@cp=\numexpr64*\cv@cp+\cv@ch-128\relax \cv@addk\cv@cp \let\cv@state\cv@ret}
+\def\cv@mend{\immediate\write1{\BS!m{\the\cv@ida}{\csname cv@v\cv@key\endcsname}}\def\cv@key{}\let\cv@state\cv@ma}
+\def\cv@tok{\immediate\openout1=\cvout \cv@vf.tex\relax \cv@ida=0 \let\cv@state\cv@vs \cv@stream{\cvdir vocab.json}%
+  \immediate\closeout1 \cv@msg{vocab}%
+  \immediate\openout1=\cvout \cv@mf.tex\relax \let\cv@state\cv@mz \cv@stream{\cvdir merges.txt}%
+  \ifx\cv@state\cv@mb \ifx\cv@key\@empty\else\cv@mend\fi\fi \immediate\closeout1 \cv@msg{merges}}
+\ifx\cv@vf\undefined\def\cv@vf{vocab}\def\cv@mf{merges}\fi
+\pdfresettimer
+\cvjobs
+\immediate\write16{[convert done in \the\numexpr\pdfelapsedtime/65536\relax s]}
+\@@end
