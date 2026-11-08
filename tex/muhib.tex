@@ -1,0 +1,46 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{muhib-gpt2}
+\title{Muhib's GPT-2, Compiled}
+\author{Muhib Waqar\\University of Waterloo}
+\date{}
+\begin{document}
+\maketitle
+
+\noindent This page was not written in advance. While \texttt{pdflatex} compiled it,
+TeX ran the full 124M-parameter GPT-2 forward pass (all 12 layers and the
+50{,}257-way output head) and picked each next token itself.\footnote{All of the
+mathematics is eTeX \texttt{\string\numexpr} integer arithmetic: about 124 million
+multiply--adds per generated token, plus layer norm, softmax, GELU and the BPE
+tokenizer, all written as TeX macros. Shell escape for this run:
+\ifnum\pdfshellescape=0 off\else on\fi. No Lua.}
+
+\bigskip
+\begin{quote}\Large
+\muhib[12]{Hello, my name is Muhib}
+\end{quote}
+\bigskip
+
+\noindent Projected compile time, according to the author: instant. Projected
+date this TeX file reaches AGI: next Tuesday.\par
+
+\bigskip
+\noindent The prompt was split into \gptnumprompt\ tokens by TeX's own BPE:
+\gptpromptids.
+
+\newcount\row \def\rows{}
+\newcommand\gptrow[1]{#1 & \gptgenid{#1} & \texttt{"\gptgentext{#1}"} & \gptgenseconds{#1}\\}
+\loop\ifnum\row<\gptnumgenerated\relax \advance\row 1
+  \edef\rows{\unexpanded\expandafter{\rows}\noexpand\gptrow{\the\row}}\repeat
+\begin{center}
+\begin{tabular}{rrlr}
+\toprule
+\# & token id & text & seconds since start \\
+\midrule
+\rows
+\bottomrule
+\end{tabular}
+\end{center}
+\end{document}

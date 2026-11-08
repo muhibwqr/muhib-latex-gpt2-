@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+hf/
+tex/w/
+*.log
+*.aux
+*.out
+*.pdf
+*.png
+*.gf
+*pk
+tex/t1.tex
+margin.py
+demo/
