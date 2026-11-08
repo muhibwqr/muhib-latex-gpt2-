@@ -278,9 +278,9 @@
 
 % ---- user commands ----
 % \muhib[n]{prompt}: tokenizes the prompt, runs GPT-2 for n greedy tokens, typesets prompt + continuation
-\newcommand\muhib[2][8]{\begingroup\globaldefs=\@ne
+\newcommand\muhib[2][8]{\edef\gpt@elc{\the\endlinechar}\begingroup\globaldefs=\@ne
   \gpt@loadtok\gpt@loadcache\gpt@encode{#2}\gpt@want=#1\relax
-  \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\endgroup
+  \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\endgroup\global\endlinechar=\gpt@elc\relax
   \textbf{#2}\gpt@i=0 \gpt@printgen}
 \def\gpt@printgen{\ifnum\gpt@i<\gpt@ngen \advance\gpt@i\@ne
   \gpt@print{\csname gpt@gen\the\gpt@i\endcsname}\expandafter\gpt@printgen\fi}
