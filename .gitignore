@@ -12,3 +12,5 @@ tex/w/
 tex/t1.tex
 margin.py
 demo/
+tex/bench*.tex
+tex/t2.tex
