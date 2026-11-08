@@ -3,18 +3,18 @@
 GPT-2 (124M) running inside TeX. You compile a LaTeX document, and `pdflatex` itself tokenizes the prompt, runs all 12 transformer layers, and picks the next token, over and over, until the page is written.
 
 ```latex
-\usepackage{muhib-gpt2}
+\usepackage[live]{muhib-gpt2}
 ...
-\muhib[6]{Hello, my name is Muhib}
+\muhib[9]{The most dangerous thing about AI is}
 ```
 
-renders as
+renders, after 15 compiles, as
 
-> **Hello, my name is Muhib**i. I am a student
+> **The most dangerous thing about AI is** that it's so easy to make mistakes.
 
-These are the same tokens the float32 reference picks greedily for that prompt (with 12 tokens it continues "of the art of the sword").
+These are the same tokens float GPT-2 picks greedily for that prompt (see [Proof](#proof)).
 
-For every token, TeX also keeps the top 5 logits and runs an online softmax over all 50,257 of them. The log prints lines like `>>> GPT-2 token 1/7: " was" 17.8% (next best: " is" 15.9%, " contains" 5.4%)`, and the PDF gets one page per token with bars for the top 5 guesses.
+For every token, TeX also keeps the top 5 logits and runs an online softmax over all 50,257 of them. The log prints lines like `>>> GPT-2 token 9/9: "." 46.8% (next best: "," 13.3%, " and" 9.1%)`, and the PDF gets one page per token with bars for the top 5 guesses.
 
 ## What actually runs where
 
@@ -27,7 +27,7 @@ Everything is TeX. The repo has no Python, Lua, JavaScript or shell scripts.
 
 - Weights are quantized per row to 12-bit integers (11-bit for the output head), with fixed-point activations (scale 2^10).
 - Each generated token costs about 124 million multiply-adds, all inside `\numexpr`.
-- Live mode (`\usepackage[live]{muhib-gpt2}`, used by `muhib.tex`): each `pdflatex` run generates one more token and saves the tokens plus the attention KV cache to `muhib.gpt`, so the PDF grows by one word per compile. Delete `muhib.gpt` to start over. Measured: the first compile (11-token prompt + 1 token) takes about 134 s, then about 17-18 s per compile/token; the 7 tokens are " was published in the journal Nature." (ids 373, 3199, 287, 262, 3989, 10362, 13), the same as float GPT-2.
+- Live mode (`\usepackage[live]{muhib-gpt2}`, used by `muhib.tex`): each `pdflatex` run generates one more token and saves the tokens plus the attention KV cache to `muhib.gpt`, so the PDF grows by one word per compile. Delete `muhib.gpt` to start over. The prompt is also read one token per compile, so `muhib.tex` ("Muhib wrote a paper about", 6 prompt tokens, 7 generated) takes 12 compiles: about 13.4 s per prompt token and 19.7 s per generated token. Its 7 tokens are " the issue in the journal Science." (ids 262, 2071, 287, 262, 3989, 5800, 13), the same as float GPT-2.
 - Weights are streamed in 128-wide input chunks. Bytes 128-255 are active characters `\countdef`'d to the chunk's input registers, so a multiply-add costs TeX about 5 characters (`+1046*` plus one byte) to read. That roughly halved the reading cost (25 s down to about 17.6 s per token) with bit-identical checksums.
 - In TeXstudio, set Build & View (`Tools\Commands\quick` in texstudio.ini) to repeat `txs:///pdflatex | txs:///view-pdf-internal --embedded` 8 times; the preview then refreshes after every compile.
 - Projected compile time, according to the author: instant.
