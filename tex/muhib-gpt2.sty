@@ -12,6 +12,7 @@
 % live: every compile generates one more token, resuming from \jobname.gpt (prompt, tokens, KV cache)
 \newif\ifgpt@live \DeclareOption{live}{\gpt@livetrue}
 \ProcessOptions\relax
+\RequirePackage{xcolor}
 
 \newcount\gpt@i \newcount\gpt@n \newcount\gpt@s \newcount\gpt@t \newcount\gpt@d
 \newcount\gpt@mean \newcount\gpt@maxd \newcount\gpt@k \newcount\gpt@pk \newcount\gpt@ptk
@@ -239,6 +240,7 @@
   \else\message{[GPT-2 thinking about token \the\numexpr\gpt@ngen+1\relax/\the\gpt@total: layer}%
     \gpt@forward\message{+ 50257-way head]}\gpt@head@argmax\gpt@record\fi
   \advance\gpt@pos\@ne
+  \ifgpt@live\ifnum\gpt@pos<\gpt@np \gpt@want=\gpt@ngen\fi\fi % live: one prompt token per compile too
   \ifnum\gpt@ngen<\gpt@want \expandafter\gpt@runloop\fi}
 \def\gpt@record{\advance\gpt@ngen\@ne
   \expandafter\edef\csname gpt@seq\the\numexpr\gpt@pos+1\relax\endcsname{\the\gpt@bestid}%
@@ -365,7 +367,13 @@
   \gpt@total=#1\relax\gpt@want=#1\relax
   \ifgpt@live\gpt@loadstate\ifnum\gpt@ngen<\gpt@want\gpt@want=\numexpr\gpt@ngen+1\relax\fi\fi
   \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\ifgpt@live\gpt@savestate\fi\gpt@restbytes\endgroup\global\endlinechar=\gpt@elc\relax
-  \gdef\gpt@prompt{#2}\textbf{#2}\gpt@i=0 \gpt@printgen}
+  \gdef\gpt@prompt{#2}\ifnum\gpt@pos<\gpt@np \gpt@i=0 \gpt@printprompt\else\textbf{#2}\fi
+  \gpt@i=0 \gpt@printgen}
+% while live mode is still reading the prompt: tokens read so far in bold, the rest greyed out
+\def\gpt@printprompt{\ifnum\gpt@i<\gpt@np
+  \ifnum\gpt@i<\gpt@pos\textbf{\gpt@print{\csname gpt@seq\the\gpt@i\endcsname}}%
+  \else\textcolor{black!30}{\gpt@print{\csname gpt@seq\the\gpt@i\endcsname}}\fi
+  \advance\gpt@i\@ne\expandafter\gpt@printprompt\fi}
 \def\gpt@printgen{\ifnum\gpt@i<\gpt@ngen \advance\gpt@i\@ne
   \gpt@print{\csname gpt@gen\the\gpt@i\endcsname}\expandafter\gpt@printgen\fi}
 \newcommand\gptpromptids{\gpt@i=0 \gpt@pids}
@@ -373,6 +381,7 @@
   \ifnum\gpt@i<\gpt@np,\ \fi\expandafter\gpt@pids\fi}
 \newcommand\gptnumgenerated{\the\gpt@ngen}
 \newcommand\gptnumprompt{\the\gpt@np}
+\newcommand\gptnumread{\ifnum\gpt@pos<\gpt@np\the\gpt@pos\else\the\gpt@np\fi}
 \newcommand\gptgenid[1]{\csname gpt@gen#1\endcsname}
 \newcommand\gptgentext[1]{\gpt@print{\csname gpt@gen#1\endcsname}}
 \newcommand\gptprompt{\gpt@prompt}

@@ -5,7 +5,9 @@ import numpy as np, os
 from multiprocessing import Pool
 from safetensors.numpy import load_file
 from sim import quant_rows, S, L, HEAD_QMAX
-OUT = 'tex/w'; B = 128
+OUT = os.environ.get('OUT', 'tex/w'); B = 128
+QMAX = int(os.environ.get('QMAX', 0)) or None
+HEAD_QMAX = int(os.environ.get('HEAD_QMAX', HEAD_QMAX))
 fx = lambda a: np.round(a * 2**S).astype(np.int64)
 _W = None
 def W():
@@ -29,11 +31,12 @@ def job(j):
     if kind == 'layer':
         p = f'h.{a}.'
         for n, k in (('qkv', 'attn.c_attn'), ('aproj', 'attn.c_proj'), ('fc', 'mlp.c_fc'), ('mproj', 'mlp.c_proj')):
-            rows(f'l{a}{n}', w[p+k+'.weight'].T, w[p+k+'.bias'])
+            rows(f'l{a}{n}', w[p+k+'.weight'].T, w[p+k+'.bias'], QMAX)
     else:
         lo, hi = a * 6283, min(50257, (a + 1) * 6283)
         rows(f'head{a}', w['wte.weight'][lo:hi], None, HEAD_QMAX)
     return j
 if __name__ == '__main__':
+    os.makedirs(OUT, exist_ok=True)
     with Pool(8) as p:
         for j in p.imap_unordered(job, [('head', i) for i in range(8)] + [('layer', l) for l in range(L)]): print('done', j, flush=True)

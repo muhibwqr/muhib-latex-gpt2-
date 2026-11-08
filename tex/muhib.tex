@@ -14,7 +14,8 @@
 \texttt{pdflatex} runs, TeX picks up where the last run stopped (the tokens and
 the attention KV cache live in \texttt{\jobname.gpt}, the way LaTeX keeps
 cross-references in \texttt{.aux}), runs the full 124M-parameter GPT-2 forward pass
-(all 12 layers and the 50{,}257-way output head), and adds one more token.\footnote{All of the
+(all 12 layers and the 50{,}257-way output head), and adds one more token. The first
+few runs read the prompt, one token per run.\footnote{All of the
 mathematics is eTeX \texttt{\string\numexpr} integer arithmetic: about 124 million
 multiply--adds per generated token, plus layer norm, softmax, GELU and the BPE
 tokenizer, all written as TeX macros. Shell escape for this run:
@@ -22,13 +23,15 @@ tokenizer, all written as TeX macros. Shell escape for this run:
 
 \bigskip
 \begin{quote}\Large
-\muhib[7]{Muhib compiled a LaTeX document, and the document}%
+\muhib[7]{Muhib wrote a paper about}%
 \ifnum\gptnumgenerated<\gptnumtotal\relax\,\textcolor{red!70!black}{\rule[-0.2ex]{0.5em}{1em}}\fi
 \end{quote}
 \bigskip
 
-\noindent\textbf{Compile status:} \gptnumgenerated\ of \gptnumtotal\ tokens
-generated\ifnum\gptnumgenerated<\gptnumtotal\relax; recompile for the next one\else; done\fi.
+\noindent\textbf{Compile status:} \ifnum\gptnumread<\gptnumprompt\relax
+TeX has read \gptnumread\ of the \gptnumprompt\ prompt tokens; recompile for the next one.\else
+\gptnumgenerated\ of \gptnumtotal\ tokens
+generated\ifnum\gptnumgenerated<\gptnumtotal\relax; recompile for the next one\else; done\fi.\fi
 
 \medskip
 \noindent Projected compile time, according to the author: instant. Projected
