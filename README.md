@@ -49,10 +49,12 @@ tex/compile.sh                      # writes tex/muhib.pdf
 Only `hf/model.safetensors`, `hf/vocab.json` and `hf/merges.txt` are needed (the official GPT-2 small files from Hugging Face). Then:
 
 ```sh
-cd tex && max_print_line=1000000 pdflatex -no-shell-escape convert.tex   # -> tex/w/
+tex/convert.sh          # -> tex/w/, runs the conversion jobs in parallel pdflatex processes
+# or, as one process:
+cd tex && max_print_line=1000000 pdflatex -no-shell-escape convert.tex
 ```
 
-`\pdffiledump` returns the checkpoint's bytes as hex. TeX parses the safetensors JSON header for tensor offsets, decodes each IEEE-754 float32 with `\numexpr`, quantizes each row exactly (round half to even on the exact value of w*qmax/amax), and writes the norms, embeddings, active-byte layer chunks, output head, vocabulary and merges. On an M4 Pro VM it takes about 22 minutes on one core (the Python exporter takes a couple of minutes), and all 780 files it writes are byte-identical to the Python export. `\def\cvout{dir/}` before `\input convert` changes the output directory. It writes the default-format files only, not the `compact` or `fonthbox` ones.
+`\pdffiledump` returns the checkpoint's bytes as hex. TeX parses the safetensors JSON header for tensor offsets, decodes each IEEE-754 float32 with `\numexpr`, quantizes each row exactly (round half to even on the exact value of w*qmax/amax), and writes the norms, embeddings, active-byte layer chunks, output head, vocabulary and merges. On a 12-core M4 Pro VM, `convert.sh` (12 pdflatex processes, one per job such as one layer matrix or one output-head slice) takes 89 s, and all 780 files it writes are byte-identical to the Python export. The shell script only starts the processes; each one is `pdflatex convert.tex` with `\cvjob{fc}{3}`-style job selection. Conv1D matrices are stored inputs-major, so for each output file TeX reads a 160-row x 128-input block with 128 `\\pdffiledump` calls, after a first pass over whole stored rows finds each row's max. `\def\cvout{dir/}` before `\input convert` changes the output directory. It writes the default-format files only, not the `compact` or `fonthbox` ones.
 
 `compile.sh` raises two of TeX's memory limits through environment variables (`save_size`, `extra_mem_top`). The default settings are too small: the vocabulary alone defines 50,257 control sequences.
 

@@ -33,3 +33,5 @@ tex/muhibw2.tex
 *.fmt
 zquant*.py
 ztfm.py
+tex/cvt/
+tex/cvj-*.log
