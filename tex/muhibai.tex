@@ -1,0 +1,71 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[live]{muhib-gpt2}
+\title{GPT-2, Compiled by pdflatex}
+\author{Muhib Waqar\\University of Waterloo}
+\date{}
+\begin{document}
+\maketitle
+
+\noindent This page is being written by its own compiler. Every time
+\texttt{pdflatex} runs, TeX picks up where the last run stopped (the tokens and
+the attention KV cache live in \texttt{\jobname.gpt}, the way LaTeX keeps
+cross-references in \texttt{.aux}), runs the full 124M-parameter GPT-2 forward pass
+(all 12 layers and the 50{,}257-way output head), and adds one more token. The first
+few runs read the prompt, one token per run.\footnote{All of the
+mathematics is eTeX \texttt{\string\numexpr} integer arithmetic: about 124 million
+multiply--adds per generated token, plus layer norm, softmax, GELU and the BPE
+tokenizer, all written as TeX macros. Shell escape for this run:
+\ifnum\pdfshellescape=0 off\else on\fi. No Lua.}
+
+\bigskip
+\begin{quote}\Large
+\muhib[9]{The most dangerous thing about AI is}%
+\ifnum\gptnumgenerated<\gptnumtotal\relax\,\textcolor{red!70!black}{\rule[-0.2ex]{0.5em}{1em}}\fi
+\end{quote}
+\bigskip
+
+\noindent\textbf{Compile status:} \ifnum\gptnumread<\gptnumprompt\relax
+TeX has read \gptnumread\ of the \gptnumprompt\ prompt tokens; recompile for the next one.\else
+\gptnumgenerated\ of \gptnumtotal\ tokens
+generated\ifnum\gptnumgenerated<\gptnumtotal\relax; recompile for the next one\else; done\fi.\fi
+
+\medskip
+\noindent Projected compile time, according to the author: instant. Projected
+date this TeX file reaches AGI: next Tuesday.\par
+
+\bigskip
+\noindent The prompt was split into \gptnumprompt\ tokens by TeX's own BPE:
+\gptpromptids.
+
+\newcount\row \def\rows{}
+\newcommand\gptrow[1]{#1 & \gptgenid{#1} & \texttt{"\gptgentext{#1}"} & \gptgenseconds{#1}\\}
+\loop\ifnum\row<\gptnumgenerated\relax \advance\row 1
+  \edef\rows{\unexpanded\expandafter{\rows}\noexpand\gptrow{\the\row}}\repeat
+\begin{center}
+\begin{tabular}{rrlr}
+\toprule
+\# & token id & text & compile time (s) \\
+\midrule
+\rows
+\bottomrule
+\end{tabular}
+\end{center}
+
+% one page per generated token: what TeX's softmax over all 50,257 tokens looked like
+\newcommand\gptbar[2]{\texttt{"\gptcandtext{#1}{#2}"} & \gptcandpct{#1}{#2}\,\% &
+  \textcolor{blue!70!black}{\rule{\dimexpr 10cm*\gptcandbp{#1}{#2}/\gptcandbp{#1}{1}\relax}{1em}}\\[2pt]}
+\newcommand\gptstep[1]{\newpage
+  \section*{Token #1 of \gptnumgenerated: TeX's top 5 guesses}
+  {\Large\textbf{\gptprompt}\gptgenbefore{#1}\colorbox{yellow}{\gptgentext{#1}}\par}
+  \bigskip\noindent Probabilities from TeX's own softmax over all 50{,}257 tokens:\par\medskip
+  {\large\begin{tabular}{lrl}
+  \gptbar{#1}{1}\gptbar{#1}{2}\gptbar{#1}{3}\gptbar{#1}{4}\gptbar{#1}{5}
+  \end{tabular}}\par\vfill
+  \noindent\small Token #1 took one \texttt{pdflatex} run of \gptgenseconds{#1} seconds.}
+\row=0
+\loop\ifnum\row<\gptnumgenerated\relax \advance\row 1 \expandafter\gptstep\expandafter{\the\row}\repeat
+\end{document}

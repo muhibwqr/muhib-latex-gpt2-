@@ -42,6 +42,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python export_vocab.py    # tokenizer -> tex/w/vocab.tex, merges.tex
 .venv/bin/python export_mc.py 12    # cache-format copies of the layer matrices
 tex/compile.sh                      # writes tex/muhib.pdf
+tex/compile.sh muhibai.tex          # the demo video: "The most dangerous thing about AI is" (15 compiles)
 ```
 
 ### Converting the checkpoint in TeX instead
