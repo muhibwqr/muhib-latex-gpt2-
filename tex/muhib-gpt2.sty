@@ -22,6 +22,9 @@
 \newcount\gpt@gx \newcount\gpt@xf \newcount\gpt@xx \newcount\gpt@xxx \newcount\gpt@u \newcount\gpt@th
 \newcount\gpt@np \newcount\gpt@ngen \newcount\gpt@want \newcount\gpt@vi
 \newcount\gpt@nc \newcount\gpt@ci \newcount\gpt@pl \newcount\gpt@sp \newcount\gpt@cl
+\newcount\gpt@Z
+\newcount\gpt@tva \newcount\gpt@tvb \newcount\gpt@tvc \newcount\gpt@tvd \newcount\gpt@tve
+\newcount\gpt@tia \newcount\gpt@tib \newcount\gpt@tic \newcount\gpt@tid \newcount\gpt@tie
 \newcount\gpt@contra \newcount\gpt@bi \newcount\gpt@bo \newcount\gpt@br \newcount\gpt@rk
 \newcount\gpt@utf
 
@@ -62,8 +65,22 @@
 \def\!Y#1#2{\advance\gpt@yi\@ne\def\gpt@ym{#1}\def\gpt@yb{#2}\afterassignment\gpt@Yfin\gpt@acc=\numexpr}
 \def\gpt@Yset{\count\gpt@yi=\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
 \def\gpt@Yadd{\advance\count\gpt@yi\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
+% LM head row: keep the top 5 logits and an online softmax sum Z (max term = 65536)
 \def\gpt@Ymax{\gpt@t=\numexpr\gpt@acc*\gpt@ym/1073741824\relax
-  \ifnum\gpt@t>\gpt@best \gpt@best=\gpt@t \gpt@bestid=\gpt@yi \fi}
+  \ifnum\gpt@t>\gpt@tve \gpt@topins\fi
+  \ifnum\gpt@t>\gpt@best
+    \ifnum\gpt@Z>0 \gpt@expneg{\numexpr(\gpt@t-\gpt@best)*64\relax}\gpt@Z=\numexpr\gpt@Z*\gpt@ex/65536\relax\fi
+    \advance\gpt@Z65536 \gpt@best=\gpt@t \gpt@bestid=\gpt@yi
+  \else\ifnum\numexpr\gpt@best-\gpt@t\relax<16384
+    \gpt@expneg{\numexpr(\gpt@best-\gpt@t)*64\relax}\advance\gpt@Z\gpt@ex\fi\fi}
+\def\gpt@topins{\ifnum\gpt@t>\gpt@tvd \gpt@tve=\gpt@tvd \gpt@tie=\gpt@tid
+    \ifnum\gpt@t>\gpt@tvc \gpt@tvd=\gpt@tvc \gpt@tid=\gpt@tic
+      \ifnum\gpt@t>\gpt@tvb \gpt@tvc=\gpt@tvb \gpt@tic=\gpt@tib
+        \ifnum\gpt@t>\gpt@tva \gpt@tvb=\gpt@tva \gpt@tib=\gpt@tia \gpt@tva=\gpt@t \gpt@tia=\gpt@yi
+        \else\gpt@tvb=\gpt@t \gpt@tib=\gpt@yi \fi
+      \else\gpt@tvc=\gpt@t \gpt@tic=\gpt@yi \fi
+    \else\gpt@tvd=\gpt@t \gpt@tid=\gpt@yi \fi
+  \else\gpt@tve=\gpt@t \gpt@tie=\gpt@yi \fi}
 \def\gpt@mvset#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@mat{#1}}
 \def\gpt@mvadd#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@mat{#1}}
 % matrices listed in w/cache.tex are read once and kept in memory as macros
@@ -183,11 +200,12 @@
   \gpt@mvset{l\the\gpt@layer fc}{15000}%
   \gpt@gelu
   \gpt@mvadd{l\the\gpt@layer mproj}{10000}%
-  \ifgpt@debug\gpt@dbg\fi}
+  \message{\the\numexpr\gpt@layer+1\relax}\ifgpt@debug\gpt@dbg\fi}
 \def\gpt@dbg{\gpt@s=0 \gpt@loop{768}{\advance\gpt@s\numexpr\gpt@X\gpt@i/16\relax}%
   \message{[dbg pos=\the\gpt@pos\space layer=\the\gpt@layer\space sum=\the\gpt@s\space
     x0=\the\gpt@X0 x767=\the\gpt@X{767}]}}
-\def\gpt@head@argmax{\gpt@best=-2147483647 \gpt@yi=-1 \let\gpt@Yfin\gpt@Ymax
+\def\gpt@head@argmax{\gpt@best=-2147483647 \gpt@yi=-1 \let\gpt@Yfin\gpt@Ymax \gpt@Z=0
+  \gpt@tva=-2147483647 \gpt@tvb=\gpt@tva \gpt@tvc=\gpt@tva \gpt@tvd=\gpt@tva \gpt@tve=\gpt@tva
   \gpt@input{head0}\gpt@input{head1}\gpt@input{head2}\gpt@input{head3}%
   \gpt@input{head4}\gpt@input{head5}\gpt@input{head6}\gpt@input{head7}}
 
@@ -195,17 +213,29 @@
 \def\gpt@run{\gpt@pos=0 \gpt@ngen=0 \edef\gpt@tzero{\gpt@now}\gpt@runloop}
 \def\gpt@runloop{%
   \gpt@tok=\csname gpt@seq\the\gpt@pos\endcsname\relax
-  \gpt@forward
   \ifnum\gpt@pos<\numexpr\gpt@np-1\relax
-    \message{[GPT-2 read prompt token \the\numexpr\gpt@pos+1\relax/\the\gpt@np]}%
-  \else\gpt@head@argmax\gpt@record\fi
+    \message{[GPT-2 prompt token \the\numexpr\gpt@pos+1\relax/\the\gpt@np\space"\gpt@msg{\the\gpt@tok}": layer}%
+    \gpt@forward\message{]}%
+  \else\message{[GPT-2 thinking about token \the\numexpr\gpt@ngen+1\relax/\the\gpt@want: layer}%
+    \gpt@forward\message{+ 50257-way head]}\gpt@head@argmax\gpt@record\fi
   \advance\gpt@pos\@ne
   \ifnum\gpt@ngen<\gpt@want \expandafter\gpt@runloop\fi}
 \def\gpt@record{\advance\gpt@ngen\@ne
   \expandafter\edef\csname gpt@seq\the\numexpr\gpt@pos+1\relax\endcsname{\the\gpt@bestid}%
   \expandafter\edef\csname gpt@gen\the\gpt@ngen\endcsname{\the\gpt@bestid}%
   \expandafter\edef\csname gpt@time\the\gpt@ngen\endcsname{\gpt@now}%
-  \message{[GPT-2 generated token \the\gpt@ngen/\the\gpt@want: id \the\gpt@bestid]}}
+  \gpt@rc a1\gpt@rc b2\gpt@rc c3\gpt@rc d4\gpt@rc e5%
+  \message{^^J>>> GPT-2 token \the\gpt@ngen/\the\gpt@want: "\gpt@msg{\the\gpt@bestid}" \gpt@cand1
+    (next best: "\gpt@msg{\gpt@cand@id2}" \gpt@cand2, "\gpt@msg{\gpt@cand@id3}" \gpt@cand3)^^J}}
+\def\gpt@cand#1{\csname gpt@cpc\the\gpt@ngen.#1\endcsname\@percentchar}
+\def\gpt@cand@id#1{\csname gpt@cid\the\gpt@ngen.#1\endcsname}
+% candidate #2 = top-5 slot #1: id, probability in basis points, and as "41.2"
+\def\gpt@rc#1#2{\gpt@expneg{\numexpr(\gpt@best-\csname gpt@tv#1\endcsname)*64\relax}%
+  \gpt@t=\numexpr\gpt@ex*10000/\gpt@Z\relax \gpt@d=\numexpr\gpt@t/10\relax
+  \expandafter\edef\csname gpt@cid\the\gpt@ngen.#2\endcsname{\the\csname gpt@ti#1\endcsname}%
+  \expandafter\edef\csname gpt@cbp\the\gpt@ngen.#2\endcsname{\the\gpt@t}%
+  \expandafter\edef\csname gpt@cpc\the\gpt@ngen.#2\endcsname
+    {\the\numexpr(2*\gpt@d-9)/20\relax.\the\numexpr\gpt@d-10*((2*\gpt@d-9)/20)\relax}}
 
 % ---- byte-level BPE tokenizer ----
 \def\!m#1#2{\expandafter\edef\csname gpt@M#1.#2\endcsname{\the\gpt@vi}\advance\gpt@vi\@ne}
@@ -269,19 +299,28 @@
 % ---- typesetting token bytes ----
 \def\gpt@print#1{\expandafter\expandafter\expandafter\gpt@pb\csname gpt@T#1\endcsname\relax,}
 \def\gpt@pb#1,{\ifx\relax#1\else\gpt@byte{#1}\expandafter\gpt@pb\fi}
-\def\gpt@byte#1{\ifnum#1=32 \ \else\ifnum#1=10 \par\else
+\let\gpt@nl\par
+\def\gpt@byte#1{\ifnum#1=32 \ \else\ifnum#1=10 \gpt@nl\else
   \ifnum#1<128 \char#1\relax\else
   \ifnum#1>191 \gpt@utf=\numexpr(#1-192)*64\relax\else
   \ifnum\gpt@utf>0 \advance\gpt@utf#1\advance\gpt@utf-128
     \ifnum\gpt@utf>191 \ifnum\gpt@utf<256 \char\gpt@utf\else?\fi\else?\fi\gpt@utf=0
   \fi\fi\fi\fi\fi}
 
+% expandable token text for \message: printable ASCII, other bytes as ?
+\gpt@t=33 \loop\ifnum\gpt@t<127 {\lccode`!=\gpt@t \lowercase{\expandafter\gdef\csname gpt@chr\the\gpt@t\endcsname{!}}}\advance\gpt@t\@ne\repeat
+\expandafter\def\csname gpt@chr32\endcsname{ }
+\def\gpt@msg#1{\expandafter\expandafter\expandafter\gpt@mb\csname gpt@T#1\endcsname\relax,}
+\def\gpt@mb#1,{\ifx\relax#1\else\gpt@mbc{#1}\expandafter\gpt@mb\fi}
+\expandafter\edef\csname gpt@chr10\endcsname{\string\n}
+\def\gpt@mbc#1{\ifcsname gpt@chr#1\endcsname\csname gpt@chr#1\endcsname\else?\fi}
+
 % ---- user commands ----
 % \muhib[n]{prompt}: tokenizes the prompt, runs GPT-2 for n greedy tokens, typesets prompt + continuation
 \newcommand\muhib[2][8]{\edef\gpt@elc{\the\endlinechar}\begingroup\globaldefs=\@ne
   \gpt@loadtok\gpt@loadcache\gpt@encode{#2}\gpt@want=#1\relax
   \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\endgroup\global\endlinechar=\gpt@elc\relax
-  \textbf{#2}\gpt@i=0 \gpt@printgen}
+  \gdef\gpt@prompt{#2}\textbf{#2}\gpt@i=0 \gpt@printgen}
 \def\gpt@printgen{\ifnum\gpt@i<\gpt@ngen \advance\gpt@i\@ne
   \gpt@print{\csname gpt@gen\the\gpt@i\endcsname}\expandafter\gpt@printgen\fi}
 \newcommand\gptpromptids{\gpt@i=0 \gpt@pids}
@@ -291,6 +330,14 @@
 \newcommand\gptnumprompt{\the\gpt@np}
 \newcommand\gptgenid[1]{\csname gpt@gen#1\endcsname}
 \newcommand\gptgentext[1]{\gpt@print{\csname gpt@gen#1\endcsname}}
+\newcommand\gptprompt{\gpt@prompt}
+\newcommand\gptgenbefore[1]{\gpt@i=0 \gpt@before{#1}}
+\def\gpt@before#1{\ifnum\gpt@i<\numexpr#1-1\relax\advance\gpt@i\@ne
+  \gpt@print{\csname gpt@gen\the\gpt@i\endcsname}\expandafter\gpt@before\expandafter{\the\numexpr#1}\fi}
+\newcommand\gptcandid[2]{\csname gpt@cid#1.#2\endcsname}
+\newcommand\gptcandtext[2]{{\def\gpt@nl{\textbackslash n}\gpt@print{\csname gpt@cid#1.#2\endcsname}}}
+\newcommand\gptcandbp[2]{\csname gpt@cbp#1.#2\endcsname}
+\newcommand\gptcandpct[2]{\csname gpt@cpc#1.#2\endcsname}
 \newcommand\gptgenseconds[1]{\the\numexpr(\csname gpt@time#1\endcsname-\gpt@tzero)/65536\relax}
 \gpt@restorebang
 \endinput

@@ -5,14 +5,16 @@ GPT-2 (124M) running inside TeX. You compile a LaTeX document, and `pdflatex` it
 ```latex
 \usepackage{muhib-gpt2}
 ...
-\muhib[12]{Hello, my name is Muhib}
+\muhib[6]{Hello, my name is Muhib}
 ```
 
 renders as
 
-> **Hello, my name is Muhib**i. I am a student of the art of the sword
+> **Hello, my name is Muhib**i. I am a student
 
-These are the same 12 tokens the float32 reference picks greedily for that prompt.
+These are the same tokens the float32 reference picks greedily for that prompt (with 12 tokens it continues "of the art of the sword").
+
+For every token, TeX also keeps the top 5 logits and runs an online softmax over all 50,257 of them. The log prints lines like `>>> GPT-2 token 3/6: " I" 38.5% (next best: "\n" 9.3%, " And" 4.2%)`, and the PDF gets one page per token with bars for the top 5 guesses. `top5_check.py` prints the same table from the Python simulator.
 
 ## What actually runs where
 
@@ -23,7 +25,7 @@ These are the same 12 tokens the float32 reference picks greedily for that promp
 
 - Weights are quantized per row to 12-bit integers (11-bit for the output head), with fixed-point activations (scale 2^10).
 - Each generated token costs about 124 million multiply-adds, all inside `\numexpr`.
-- The full demo takes about 9 minutes to compile, roughly 30 s per token.
+- The 6-token demo compiles in about 4 minutes: about 1.5-2 minutes to read the 7-token prompt, then roughly 25 s per token.
 - Projected compile time, according to the author: instant.
 
 ## Run it
@@ -41,9 +43,13 @@ tex/compile.sh                      # writes tex/muhib.pdf
 
 `compile.sh` raises two of TeX's memory limits through environment variables (`save_size`, `extra_mem_top`). The default settings are too small: the vocabulary alone defines 50,257 control sequences.
 
+## TeXstudio
+
+Opening `muhib.tex` in TeXstudio and pressing Build & View works when TeXstudio is started with the same environment variables (`env save_size=5000000 extra_mem_top=240000000 texstudio muhib.tex`). The PDF opens in the built-in viewer. TeXstudio's Messages pane only fills in after the compile finishes, so to watch tokens appear, run `tail -f muhib.log` in its Terminal tab.
+
 ## Speed
 
-Most of the time goes into TeX tokenizing the weight text, not into the arithmetic. One benchmark on a 768x3072 matrix took 533 ms just to read and tokenize it, but only 146 ms to evaluate it once it was already in memory. So at startup TeX reads the matrices of the layers listed in `tex/w/cache.tex` once and stores each one as a macro, with every weight a single `\mathchardef` token. Every later forward step then skips re-reading those matrices. TeX's main memory tops out at roughly 186M words, which is enough for layers 0-4 (about 140M words). The other 7 layers and the output head still stream from disk. The full 12-token demo went from 453 s to 374-439 s across runs (all timed while screen recording), with identical token ids.
+Most of the time goes into TeX tokenizing the weight text, not into the arithmetic. One benchmark on a 768x3072 matrix took 533 ms just to read and tokenize it, but only 146 ms to evaluate it once it was already in memory. So at startup TeX reads the matrices of the layers listed in `tex/w/cache.tex` once and stores each one as a macro, with every weight a single `\mathchardef` token. Every later forward step then skips re-reading those matrices. TeX's main memory tops out at roughly 186M words, which is enough for layers 0-4 (about 140M words). The other 7 layers and the output head still stream from disk. The full 12-token demo went from 453 s to 374-439 s across runs (all timed while screen recording), with identical token ids. Pruning does not help: zeroing even the smallest 50% of each row changes the output into "in, and I'm the name of the name. I" (`prune_test.py`).
 
 To check the arithmetic against Python, load the package with `\usepackage[debug]{muhib-gpt2}`. It prints per-layer checksums that should match `DEBUG=1 .venv/bin/python sim.py` exactly.
 

@@ -14,3 +14,7 @@ margin.py
 demo/
 tex/bench*.tex
 tex/t2.tex
+tex/lb*.tex
+*.synctex.gz
+prune_*.log
+top5_ref.log
