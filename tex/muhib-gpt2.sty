@@ -64,8 +64,14 @@
 \def\gpt@Yadd{\advance\count\gpt@yi\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
 \def\gpt@Ymax{\gpt@t=\numexpr\gpt@acc*\gpt@ym/1073741824\relax
   \ifnum\gpt@t>\gpt@best \gpt@best=\gpt@t \gpt@bestid=\gpt@yi \fi}
-\def\gpt@mvset#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@input{#1}}
-\def\gpt@mvadd#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@input{#1}}
+\def\gpt@mvset#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@mat{#1}}
+\def\gpt@mvadd#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@mat{#1}}
+% matrices listed in w/cache.tex are read once and kept in memory as macros
+\def\gpt@cache#1#2{\expandafter\gdef\csname gpt@C#1\endcsname{#2}}
+\def\gpt@mat#1{\ifcsname gpt@C#1\endcsname\expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi
+  {\csname gpt@C#1\endcsname}{\gpt@input{#1}}}
+\def\gpt@loadcache{\ifx\gpt@cacheloaded\relax\else\let\gpt@cacheloaded\relax
+  \IfFileExists{\gpt@dir cache.tex}{\message{[GPT-2 loading weights into TeX memory]}\gpt@input{cache}}{}\fi}
 
 % ---- embeddings: lines \ifnum\gpt@tok=<id> \!x v \!x v ... \fi ----
 \def\gpt@xset{\advance\gpt@xi\@ne\count\gpt@xi=}
@@ -270,7 +276,7 @@
 % ---- user commands ----
 % \muhib[n]{prompt}: tokenizes the prompt, runs GPT-2 for n greedy tokens, typesets prompt + continuation
 \newcommand\muhib[2][8]{\begingroup\globaldefs=\@ne
-  \gpt@loadtok\gpt@encode{#2}\gpt@want=#1\relax
+  \gpt@loadtok\gpt@loadcache\gpt@encode{#2}\gpt@want=#1\relax
   \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\endgroup
   \textbf{#2}\gpt@i=0 \gpt@printgen}
 \def\gpt@printgen{\ifnum\gpt@i<\gpt@ngen \advance\gpt@i\@ne

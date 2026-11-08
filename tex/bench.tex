@@ -1,0 +1,13 @@
+\documentclass{article}
+\usepackage{muhib-gpt2}
+\makeatletter
+\def\T#1{\message{[#1: \the\numexpr\pdfelapsedtime*1000/65536\relax ms]}}
+\begin{document}
+\gpt@input{bench_defs}
+\pdfresettimer \gpt@mvset{l0fc}{15000}\T{E1 numeric file tokenize+eval}
+\pdfresettimer \gpt@mvset{bench_fmc}{15000}\T{E5 mathchardef file tokenize+eval}
+\begingroup\def\!Y#1#2#3\relax{}\pdfresettimer \gpt@input{l0fc}\T{E2 numeric file gobble}
+\pdfresettimer \gpt@input{bench_fmc}\T{E6 mathchardef file gobble}\endgroup
+\gpt@input{bench_rnum}\pdfresettimer \gpt@loop{3072}{\gpt@acc=\numexpr\R\relax}\T{E3 numeric in-memory eval}
+\gpt@input{bench_rmc}\pdfresettimer \gpt@loop{3072}{\gpt@acc=\numexpr\R\relax}\T{E4 mathchardef in-memory eval}
+\end{document}

@@ -1,0 +1,16 @@
+\documentclass{article}
+\usepackage{muhib-gpt2}
+\makeatletter\catcode33=11
+\def\T#1{\message{[#1: \the\numexpr\pdfelapsedtime*1000/65536\relax ms]}}
+\def\!C#1{\global\gpt@yi=14999 \gpt@k=0 \def\gpt@cc{#1}\gpt@chunkloop}
+\def\gpt@chunkloop{\ifnum\gpt@k<128 \lccode126=\numexpr128+\gpt@k\relax
+  \gpt@d=\numexpr\gpt@cc*128+\gpt@k\relax
+  \expandafter\gpt@letc\csname !\gpt@ns\gpt@d\endcsname
+  \advance\gpt@k\@ne\expandafter\gpt@chunkloop\fi}
+\def\gpt@letc#1{\lowercase{\let~}#1}
+\def\!Z{\global\advance\gpt@yi\@ne\global\advance\count\gpt@yi\numexpr}
+\begin{document}
+\pdfresettimer \gpt@mvset{l0fc}{15000}\T{E1 numeric file tokenize+eval}
+\begingroup \count255=128 \loop\catcode\count255=13 \ifnum\count255<255 \advance\count255 1 \repeat
+\pdfresettimer \gpt@input{bench_fac}\T{E7 active-char chunked file}\endgroup
+\end{document}

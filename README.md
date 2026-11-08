@@ -35,10 +35,15 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python download.py        # GPT-2 small from Hugging Face -> hf/
 .venv/bin/python export.py          # weights -> tex/w/*.tex
 .venv/bin/python export_vocab.py    # tokenizer -> tex/w/vocab.tex, merges.tex
+.venv/bin/python export_mc.py 12    # cache-format copies of the layer matrices
 tex/compile.sh                      # writes tex/muhib.pdf
 ```
 
 `compile.sh` raises two of TeX's memory limits through environment variables (`save_size`, `extra_mem_top`). The default settings are too small: the vocabulary alone defines 50,257 control sequences.
+
+## Speed
+
+Most of the time goes into TeX tokenizing the weight text, not into the arithmetic. One benchmark on a 768x3072 matrix took 533 ms just to read and tokenize it, but only 146 ms to evaluate it once it was already in memory. So at startup TeX reads the matrices of the layers listed in `tex/w/cache.tex` once and stores each one as a macro, with every weight a single `\mathchardef` token. Every later forward step then skips re-reading those matrices. TeX's main memory tops out at roughly 186M words, which is enough for layers 0-4 (about 140M words). The other 7 layers and the output head still stream from disk. In practice this barely helps: the full 12-token demo went from 453 s to 428 s. Both times were measured while screen recording.
 
 To check the arithmetic against Python, load the package with `\usepackage[debug]{muhib-gpt2}`. It prints per-layer checksums that should match `DEBUG=1 .venv/bin/python sim.py` exactly.
 
