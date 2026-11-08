@@ -1,8 +1,8 @@
 """Integer fixed-point GPT-2 that mirrors the TeX arithmetic exactly (eTeX \numexpr semantics)."""
-import numpy as np, math
+import numpy as np, math, os
 from safetensors.numpy import load_file
 S = 10            # activation fractional bits
-QMAX = 2047       # weight quantization range
+QMAX = int(os.environ.get("QMAX", 2047))  # weight quantization range
 HEAD_QMAX = 1023  # LM head: smaller range keeps the 768-term sums far from 2^31
 SK = 8            # key fractional bits (cached keys)
 F = 1 << 16       # exp / probability unit

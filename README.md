@@ -54,6 +54,8 @@ Opening `muhib.tex` in TeXstudio and pressing Build & View works when TeXstudio 
 
 Most of the time goes into TeX tokenizing the weight text, not into the arithmetic. One benchmark on a 768x3072 matrix took 533 ms just to read and tokenize it, but only 146 ms to evaluate it once it was already in memory. So at startup TeX reads the matrices of the layers listed in `tex/w/cache.tex` once and stores each one as a macro, with every weight a single `\mathchardef` token. Every later forward step then skips re-reading those matrices. TeX's main memory tops out at roughly 186M words, which is enough for layers 0-4 (about 140M words). The other 7 layers and the output head still stream from disk. The full 12-token demo went from 453 s to 374-439 s across runs (all timed while screen recording), with identical token ids. Pruning does not help: zeroing even the smallest 50% of each row changes the output into "in, and I'm the name of the name. I" (`prune_test.py`).
 
+Experimental `compact` option (`\usepackage[live,compact]{muhib-gpt2}`, files from `export_wb.py`): each layer weight becomes one byte, an active character `\countdef`'d to a register holding a 5-bit weight, so a multiply-add is 4 characters (`+`, weight byte, `*`, input byte). On an M4 Pro VM it cut a generation compile from 19.7 s to 16.5 s and a prompt compile from 13.4 s to 10.6 s. The 84 per-layer checksums match `QMAX=31 DEBUG=1 .venv/bin/python sim.py`, and both demo prompts keep their output, but 5-bit weights change the output on 4 of 8 other test prompts, so it is off by default.
+
 To check the arithmetic against Python, load the package with `\usepackage[debug]{muhib-gpt2}`. It prints per-layer checksums that should match `DEBUG=1 .venv/bin/python sim.py` exactly.
 
 ## Files
@@ -62,5 +64,6 @@ To check the arithmetic against Python, load the package with `\usepackage[debug
 - `tex/muhib.tex`: the demo document
 - `tex/compile.sh`: the compile wrapper
 - `export.py`, `export_vocab.py`: write the weight and tokenizer files that TeX reads
+- `export_wb.py`: 5-bit weight-byte layer files for the experimental `compact` option
 - `sim.py`: integer simulator of the TeX arithmetic
 - `ref.py`: float GPT-2 reference in NumPy
