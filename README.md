@@ -14,7 +14,7 @@ renders as
 
 These are the same tokens the float32 reference picks greedily for that prompt (with 12 tokens it continues "of the art of the sword").
 
-For every token, TeX also keeps the top 5 logits and runs an online softmax over all 50,257 of them. The log prints lines like `>>> GPT-2 token 3/6: " I" 38.5% (next best: "\n" 9.3%, " And" 4.2%)`, and the PDF gets one page per token with bars for the top 5 guesses. `top5_check.py` prints the same table from the Python simulator.
+For every token, TeX also keeps the top 5 logits and runs an online softmax over all 50,257 of them. The log prints lines like `>>> GPT-2 token 1/7: " was" 17.8% (next best: " is" 15.9%, " contains" 5.4%)`, and the PDF gets one page per token with bars for the top 5 guesses. `top5_check.py` prints the same table from the Python simulator.
 
 ## What actually runs where
 
@@ -25,7 +25,9 @@ For every token, TeX also keeps the top 5 logits and runs an online softmax over
 
 - Weights are quantized per row to 12-bit integers (11-bit for the output head), with fixed-point activations (scale 2^10).
 - Each generated token costs about 124 million multiply-adds, all inside `\numexpr`.
-- The 6-token demo compiles in about 4 minutes: about 1.5-2 minutes to read the 7-token prompt, then roughly 25 s per token.
+- Live mode (`\usepackage[live]{muhib-gpt2}`, used by `muhib.tex`): each `pdflatex` run generates one more token and saves the tokens plus the attention KV cache to `muhib.gpt`, so the PDF grows by one word per compile. Delete `muhib.gpt` to start over. Measured: the first compile (11-token prompt + 1 token) takes about 134 s, then about 17-18 s per compile/token; the 7 tokens are " was published in the journal Nature." (ids 373, 3199, 287, 262, 3989, 10362, 13), the same as float GPT-2.
+- Weights are streamed in 128-wide input chunks. Bytes 128-255 are active characters `\countdef`'d to the chunk's input registers, so a multiply-add costs TeX about 5 characters (`+1046*` plus one byte) to read. That roughly halved the reading cost (25 s down to about 17.6 s per token) with bit-identical checksums.
+- In TeXstudio, set Build & View (`Tools\Commands\quick` in texstudio.ini) to repeat `txs:///pdflatex | txs:///view-pdf-internal --embedded` 8 times; the preview then refreshes after every compile.
 - Projected compile time, according to the author: instant.
 
 ## Run it
@@ -35,7 +37,8 @@ You need TeX Live (or MacTeX) with `pdflatex`, Python 3, and about 2 GB of disk.
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python download.py        # GPT-2 small from Hugging Face -> hf/
-.venv/bin/python export.py          # weights -> tex/w/*.tex
+.venv/bin/python export.py          # norms, embeddings -> tex/w/*.tex
+.venv/bin/python export_act.py      # weight matrices in active-byte chunks -> tex/w/*.c<k>.tex
 .venv/bin/python export_vocab.py    # tokenizer -> tex/w/vocab.tex, merges.tex
 .venv/bin/python export_mc.py 12    # cache-format copies of the layer matrices
 tex/compile.sh                      # writes tex/muhib.pdf

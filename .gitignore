@@ -18,3 +18,9 @@ tex/lb*.tex
 *.synctex.gz
 prune_*.log
 top5_ref.log
+*.gpt
+rt/
+bench2/
+tex/t_*.tex
+tex/fmt*.tex
+export_act.log

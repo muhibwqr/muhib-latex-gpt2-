@@ -9,6 +9,8 @@
 \newcommand\gptweights[1]{\def\gpt@dir{#1/}}
 \newif\ifgpt@debug
 \DeclareOption{debug}{\gpt@debugtrue}
+% live: every compile generates one more token, resuming from \jobname.gpt (prompt, tokens, KV cache)
+\newif\ifgpt@live \DeclareOption{live}{\gpt@livetrue}
 \ProcessOptions\relax
 
 \newcount\gpt@i \newcount\gpt@n \newcount\gpt@s \newcount\gpt@t \newcount\gpt@d
@@ -20,13 +22,13 @@
 \newcount\gpt@oi \newcount\gpt@p \newcount\gpt@E \newcount\gpt@mx
 \newcount\gpt@ey \newcount\gpt@en \newcount\gpt@er \newcount\gpt@ex
 \newcount\gpt@gx \newcount\gpt@xf \newcount\gpt@xx \newcount\gpt@xxx \newcount\gpt@u \newcount\gpt@th
-\newcount\gpt@np \newcount\gpt@ngen \newcount\gpt@want \newcount\gpt@vi
+\newcount\gpt@np \newcount\gpt@ngen \newcount\gpt@want \newcount\gpt@total \newread\gpt@srd \newwrite\gpt@sf \newcount\gpt@vi
 \newcount\gpt@nc \newcount\gpt@ci \newcount\gpt@pl \newcount\gpt@sp \newcount\gpt@cl
 \newcount\gpt@Z
 \newcount\gpt@tva \newcount\gpt@tvb \newcount\gpt@tvc \newcount\gpt@tvd \newcount\gpt@tve
 \newcount\gpt@tia \newcount\gpt@tib \newcount\gpt@tic \newcount\gpt@tid \newcount\gpt@tie
 \newcount\gpt@contra \newcount\gpt@bi \newcount\gpt@bo \newcount\gpt@br \newcount\gpt@rk
-\newcount\gpt@utf
+\newcount\gpt@utf \newcount\gpt@ai \newcount\gpt@ck
 
 % Register layout (eTeX gives 32768 \count registers):
 %   10000+i residual x (768)      11000+i LN output / attention output (768)
@@ -61,8 +63,14 @@
 \def\gpt@input#1{\edef\gpt@restore{\catcode33=\the\catcode33 \catcode64=\the\catcode64 \endlinechar=\the\endlinechar\relax}%
   \catcode33=11 \catcode64=11 \endlinechar=-1 \@@input\gpt@dir#1.tex\relax\gpt@restore}
 
-% ---- matrix-vector rows: \!Y{m}{bias}<sum of w*x terms>\relax ----
-\def\!Y#1#2{\advance\gpt@yi\@ne\def\gpt@ym{#1}\def\gpt@yb{#2}\afterassignment\gpt@Yfin\gpt@acc=\numexpr}
+% ---- matrix-vector rows, streamed in 128-wide input chunks ----
+% Chunk file line = one row:  \!S|\!U|\!Y{m}{bias}  then terms +w*<byte>  then \relax.
+% Byte 128+j is an active character \countdef'd to input register 128*chunk+j, so a
+% term costs TeX just five or six characters to read.  Rows accumulate in 21000+r.
+\def\!S{\advance\gpt@ai\@ne\count\gpt@ai=\numexpr0}
+\def\!U{\advance\gpt@ai\@ne\count\gpt@ai=\numexpr\count\gpt@ai}
+\def\!Y#1#2{\advance\gpt@ai\@ne\advance\gpt@yi\@ne\def\gpt@ym{#1}\def\gpt@yb{#2}%
+  \afterassignment\gpt@Yfin\gpt@acc=\numexpr\count\gpt@ai}
 \def\gpt@Yset{\count\gpt@yi=\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
 \def\gpt@Yadd{\advance\count\gpt@yi\numexpr\gpt@acc*\gpt@ym/1073741824+\gpt@yb\relax}
 % LM head row: keep the top 5 logits and an online softmax sum Z (max term = 65536)
@@ -81,17 +89,29 @@
       \else\gpt@tvc=\gpt@t \gpt@tic=\gpt@yi \fi
     \else\gpt@tvd=\gpt@t \gpt@tid=\gpt@yi \fi
   \else\gpt@tve=\gpt@t \gpt@tie=\gpt@yi \fi}
-\def\gpt@mvset#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@mat{#1}}
-\def\gpt@mvadd#1#2{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@mat{#1}}
-% matrices listed in w/cache.tex are read once and kept in memory as macros
-\def\gpt@cache#1#2{\expandafter\gdef\csname gpt@C#1\endcsname{#2}}
-\def\gpt@mat#1{\ifcsname gpt@C#1\endcsname\expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi
-  {\csname gpt@C#1\endcsname}{\gpt@input{#1}}}
-% primitive file test: \IfFileExists under \globaldefs=1 leaks \escapechar=-1
-\newread\gpt@rd
-\def\gpt@loadcache{\ifx\gpt@cacheloaded\relax\else\let\gpt@cacheloaded\relax
-  \openin\gpt@rd=\gpt@dir cache.tex \ifeof\gpt@rd\else\closein\gpt@rd
-  \message{[GPT-2 loading weights into TeX memory]}\gpt@input{cache}\fi\fi}
+\def\gpt@mvset#1#2#3{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yset\gpt@amat{#1}{#3}}
+\def\gpt@mvadd#1#2#3{\gpt@yi=\numexpr#2-1\relax\let\gpt@Yfin\gpt@Yadd\gpt@amat{#1}{#3}}
+\def\gpt@amat#1#2{\def\gpt@mname{#1}\def\gpt@mbank{#2}\gpt@ck=0
+  \edef\gpt@nck{\if G#2 24\else 6\fi}\gpt@chunk}
+\def\gpt@chunk{\ifnum\gpt@ck<\gpt@nck\relax
+  \gpt@ai=20999 \csname gpt@bk\gpt@mbank\the\gpt@ck\endcsname
+  \gpt@input{\gpt@mname.c\the\gpt@ck}\advance\gpt@ck\@ne\expandafter\gpt@chunk\fi}
+% bank macros: \gpt@bkA<k> / \gpt@bkG<k> = 128 x \countdef<byte 128+j>=<base+128k+j>
+\edef\gpt@lcsave{\the\lccode126}
+\def\gpt@mkbank#1#2#3{\gdef\gpt@tmp{}\gpt@j=0 \def\gpt@mkb{\ifnum\gpt@j<128 \lccode126=\numexpr128+\gpt@j\relax
+    \lowercase{\xdef\gpt@tmp{\unexpanded\expandafter{\gpt@tmp}\countdef\noexpand~=\the\numexpr#3+128*#2+\gpt@j\relax\relax}}%
+    \advance\gpt@j\@ne\expandafter\gpt@mkb\fi}\gpt@mkb
+  \expandafter\global\expandafter\let\csname gpt@bk#1#2\endcsname\gpt@tmp}
+\gpt@k=0 \loop\ifnum\gpt@k<24 \ifnum\gpt@k<6 \gpt@mkbank A{\the\gpt@k}{11000}\fi
+  \gpt@mkbank G{\the\gpt@k}{15000}\advance\gpt@k\@ne\repeat
+\lccode126=\gpt@lcsave\relax
+% the bytes 128-255 are LaTeX's UTF-8 active characters: save and restore their meaning
+\def\gpt@savebytes{\gpt@j=128 \gpt@sbl\lccode126=\gpt@lcsave\relax}
+\def\gpt@sbl{\ifnum\gpt@j<256 \lccode126=\gpt@j
+  \lowercase{\expandafter\let\csname gpt@sv\the\gpt@j\endcsname~}\advance\gpt@j\@ne\expandafter\gpt@sbl\fi}
+\def\gpt@restbytes{\gpt@j=128 \gpt@rbl\lccode126=\gpt@lcsave\relax}
+\def\gpt@rbl{\ifnum\gpt@j<256 \lccode126=\gpt@j
+  \lowercase{\expandafter\let\expandafter~\csname gpt@sv\the\gpt@j\endcsname}\advance\gpt@j\@ne\expandafter\gpt@rbl\fi}
 
 % ---- embeddings: lines \ifnum\gpt@tok=<id> \!x v \!x v ... \fi ----
 \def\gpt@xset{\advance\gpt@xi\@ne\count\gpt@xi=}
@@ -193,39 +213,39 @@
 \def\gpt@layers{\ifnum\gpt@layer<12 \gpt@onelayer\advance\gpt@layer\@ne\expandafter\gpt@layers\fi}
 \def\gpt@onelayer{%
   \gpt@ln{l\the\gpt@layer ln1}%
-  \gpt@mvset{l\the\gpt@layer qkv}{12000}%
+  \gpt@mvset{l\the\gpt@layer qkv}{12000}{A}%
   \gpt@attn
-  \gpt@mvadd{l\the\gpt@layer aproj}{10000}%
+  \gpt@mvadd{l\the\gpt@layer aproj}{10000}{A}%
   \gpt@ln{l\the\gpt@layer ln2}%
-  \gpt@mvset{l\the\gpt@layer fc}{15000}%
+  \gpt@mvset{l\the\gpt@layer fc}{15000}{A}%
   \gpt@gelu
-  \gpt@mvadd{l\the\gpt@layer mproj}{10000}%
+  \gpt@mvadd{l\the\gpt@layer mproj}{10000}{G}%
   \message{\the\numexpr\gpt@layer+1\relax}\ifgpt@debug\gpt@dbg\fi}
 \def\gpt@dbg{\gpt@s=0 \gpt@loop{768}{\advance\gpt@s\numexpr\gpt@X\gpt@i/16\relax}%
   \message{[dbg pos=\the\gpt@pos\space layer=\the\gpt@layer\space sum=\the\gpt@s\space
     x0=\the\gpt@X0 x767=\the\gpt@X{767}]}}
 \def\gpt@head@argmax{\gpt@best=-2147483647 \gpt@yi=-1 \let\gpt@Yfin\gpt@Ymax \gpt@Z=0
   \gpt@tva=-2147483647 \gpt@tvb=\gpt@tva \gpt@tvc=\gpt@tva \gpt@tvd=\gpt@tva \gpt@tve=\gpt@tva
-  \gpt@input{head0}\gpt@input{head1}\gpt@input{head2}\gpt@input{head3}%
-  \gpt@input{head4}\gpt@input{head5}\gpt@input{head6}\gpt@input{head7}}
+  \gpt@amat{head0}A\gpt@amat{head1}A\gpt@amat{head2}A\gpt@amat{head3}A%
+  \gpt@amat{head4}A\gpt@amat{head5}A\gpt@amat{head6}A\gpt@amat{head7}A}
 
 \def\gpt@now{\ifdefined\pdfelapsedtime\the\pdfelapsedtime\else0\fi}
-\def\gpt@run{\gpt@pos=0 \gpt@ngen=0 \edef\gpt@tzero{\gpt@now}\gpt@runloop}
+\def\gpt@run{\edef\gpt@tzero{\gpt@now}\ifnum\gpt@ngen<\gpt@want \expandafter\gpt@runloop\fi}
 \def\gpt@runloop{%
   \gpt@tok=\csname gpt@seq\the\gpt@pos\endcsname\relax
   \ifnum\gpt@pos<\numexpr\gpt@np-1\relax
     \message{[GPT-2 prompt token \the\numexpr\gpt@pos+1\relax/\the\gpt@np\space"\gpt@msg{\the\gpt@tok}": layer}%
     \gpt@forward\message{]}%
-  \else\message{[GPT-2 thinking about token \the\numexpr\gpt@ngen+1\relax/\the\gpt@want: layer}%
+  \else\message{[GPT-2 thinking about token \the\numexpr\gpt@ngen+1\relax/\the\gpt@total: layer}%
     \gpt@forward\message{+ 50257-way head]}\gpt@head@argmax\gpt@record\fi
   \advance\gpt@pos\@ne
   \ifnum\gpt@ngen<\gpt@want \expandafter\gpt@runloop\fi}
 \def\gpt@record{\advance\gpt@ngen\@ne
   \expandafter\edef\csname gpt@seq\the\numexpr\gpt@pos+1\relax\endcsname{\the\gpt@bestid}%
   \expandafter\edef\csname gpt@gen\the\gpt@ngen\endcsname{\the\gpt@bestid}%
-  \expandafter\edef\csname gpt@time\the\gpt@ngen\endcsname{\gpt@now}%
+  \expandafter\edef\csname gpt@sec\the\gpt@ngen\endcsname{\the\numexpr(\gpt@now-\gpt@tzero)/65536\relax}%
   \gpt@rc a1\gpt@rc b2\gpt@rc c3\gpt@rc d4\gpt@rc e5%
-  \message{^^J>>> GPT-2 token \the\gpt@ngen/\the\gpt@want: "\gpt@msg{\the\gpt@bestid}" \gpt@cand1
+  \message{^^J>>> GPT-2 token \the\gpt@ngen/\the\gpt@total: "\gpt@msg{\the\gpt@bestid}" \gpt@cand1
     (next best: "\gpt@msg{\gpt@cand@id2}" \gpt@cand2, "\gpt@msg{\gpt@cand@id3}" \gpt@cand3)^^J}}
 \def\gpt@cand#1{\csname gpt@cpc\the\gpt@ngen.#1\endcsname\@percentchar}
 \def\gpt@cand@id#1{\csname gpt@cid\the\gpt@ngen.#1\endcsname}
@@ -315,11 +335,36 @@
 \expandafter\edef\csname gpt@chr10\endcsname{\string\n}
 \def\gpt@mbc#1{\ifcsname gpt@chr#1\endcsname\csname gpt@chr#1\endcsname\else?\fi}
 
+% ---- live mode state file: plain TeX assignments, read back with \@@input ----
+\def\gpt@kv#1#2{\expandafter\gdef\csname#1\endcsname{#2}}
+\def\gpt@loadstate{\openin\gpt@srd=\jobname.gpt\relax\ifeof\gpt@srd\else\closein\gpt@srd
+  \edef\gpt@restore{\catcode33=\the\catcode33 \catcode64=\the\catcode64 \endlinechar=\the\endlinechar\relax}%
+  \catcode33=11 \catcode64=11 \endlinechar=-1 \@@input\jobname.gpt\relax\gpt@restore
+  \ifnum\pdfstrcmp{\detokenize\expandafter{\gpt@stp}}{\detokenize\expandafter{\gpt@prompt@now}}=0
+  \message{[GPT-2 live: resuming at token \the\numexpr\gpt@ngen+1\relax, position \the\gpt@pos]}%
+  \else\gpt@pos=0 \gpt@ngen=0 \gpt@encode{\gpt@prompt@now}\message{[GPT-2 live: new prompt, starting over]}\fi\fi}
+\def\gpt@wr#1{\immediate\write\gpt@sf{\noexpand\gpt@kv{#1}{\unexpanded\expandafter\expandafter\expandafter{\csname#1\endcsname}}}}
+\def\gpt@savestate{\escapechar=92 \immediate\openout\gpt@sf=\jobname.gpt\relax
+  \immediate\write\gpt@sf{\gdef\noexpand\gpt@stp{\unexpanded\expandafter{\gpt@prompt@now}}%
+    \gpt@ngen=\the\gpt@ngen\space\gpt@pos=\the\gpt@pos\relax}%
+  \gpt@i=0 \gpt@svseq \gpt@i=1 \gpt@svgen \gpt@layer=0 \gpt@svkv
+  \immediate\closeout\gpt@sf}
+\def\gpt@svseq{\ifnum\gpt@i>\gpt@pos\else\gpt@wr{gpt@seq\the\gpt@i}\advance\gpt@i\@ne\expandafter\gpt@svseq\fi}
+\def\gpt@svgen{\ifnum\gpt@i>\gpt@ngen\else\gpt@wr{gpt@gen\the\gpt@i}\gpt@wr{gpt@sec\the\gpt@i}%
+  \gpt@d=1 \gpt@svcand\advance\gpt@i\@ne\expandafter\gpt@svgen\fi}
+\def\gpt@svcand{\ifnum\gpt@d<6 \gpt@wr{gpt@cid\the\gpt@i.\the\gpt@d}\gpt@wr{gpt@cbp\the\gpt@i.\the\gpt@d}%
+  \gpt@wr{gpt@cpc\the\gpt@i.\the\gpt@d}\advance\gpt@d\@ne\expandafter\gpt@svcand\fi}
+\def\gpt@svkv{\ifnum\gpt@layer<12 \gpt@tp=0 \gpt@svkvt\advance\gpt@layer\@ne\expandafter\gpt@svkv\fi}
+\def\gpt@svkvt{\ifnum\gpt@tp<\gpt@pos \gpt@h=0 \gpt@svkvh\advance\gpt@tp\@ne\expandafter\gpt@svkvt\fi}
+\def\gpt@svkvh{\ifnum\gpt@h<12 \gpt@wr{\gpt@kname}\gpt@wr{\gpt@vname}\advance\gpt@h\@ne\expandafter\gpt@svkvh\fi}
+
 % ---- user commands ----
 % \muhib[n]{prompt}: tokenizes the prompt, runs GPT-2 for n greedy tokens, typesets prompt + continuation
 \newcommand\muhib[2][8]{\edef\gpt@elc{\the\endlinechar}\begingroup\globaldefs=\@ne
-  \gpt@loadtok\gpt@loadcache\gpt@encode{#2}\gpt@want=#1\relax
-  \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\endgroup\global\endlinechar=\gpt@elc\relax
+  \gpt@loadtok\gpt@savebytes\gpt@encode{#2}\def\gpt@prompt@now{#2}\gpt@pos=0 \gpt@ngen=0
+  \gpt@total=#1\relax\gpt@want=#1\relax
+  \ifgpt@live\gpt@loadstate\ifnum\gpt@ngen<\gpt@want\gpt@want=\numexpr\gpt@ngen+1\relax\fi\fi
+  \message{[GPT-2 prompt = \the\gpt@np\space tokens]}\gpt@run\ifgpt@live\gpt@savestate\fi\gpt@restbytes\endgroup\global\endlinechar=\gpt@elc\relax
   \gdef\gpt@prompt{#2}\textbf{#2}\gpt@i=0 \gpt@printgen}
 \def\gpt@printgen{\ifnum\gpt@i<\gpt@ngen \advance\gpt@i\@ne
   \gpt@print{\csname gpt@gen\the\gpt@i\endcsname}\expandafter\gpt@printgen\fi}
@@ -338,6 +383,7 @@
 \newcommand\gptcandtext[2]{{\def\gpt@nl{\textbackslash n}\gpt@print{\csname gpt@cid#1.#2\endcsname}}}
 \newcommand\gptcandbp[2]{\csname gpt@cbp#1.#2\endcsname}
 \newcommand\gptcandpct[2]{\csname gpt@cpc#1.#2\endcsname}
-\newcommand\gptgenseconds[1]{\the\numexpr(\csname gpt@time#1\endcsname-\gpt@tzero)/65536\relax}
+\newcommand\gptgenseconds[1]{\csname gpt@sec#1\endcsname}
+\newcommand\gptnumtotal{\the\gpt@total}
 \gpt@restorebang
 \endinput
